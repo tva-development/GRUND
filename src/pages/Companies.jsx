@@ -157,7 +157,6 @@ function Companies() {
 
   return (
     <>
-      <span className="eyebrow">Companies</span>
       <h1>Companies</h1>
 
       <div className="companies-toolbar">
