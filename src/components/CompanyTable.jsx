@@ -29,6 +29,7 @@ function CompanyTable({ companies }) {
           <th>Name</th>
           <th>Org number</th>
           <th>Legal form</th>
+          <th>Address</th>
           <th>City</th>
           <th>Industry</th>
           <th>Status</th>
@@ -52,6 +53,7 @@ function CompanyTable({ companies }) {
               </td>
               <td>{company.org_number ?? '—'}</td>
               <td>{COMPANY_FORM_LABELS[company.company_form] ?? company.company_form ?? '—'}</td>
+              <td>{company.address ?? '—'}</td>
               <td>{company.city ?? '—'}</td>
               <td>{company.industry_label ?? '—'}</td>
               <td>
