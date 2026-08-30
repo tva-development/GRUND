@@ -32,6 +32,16 @@ function CompanyTable({
 
   return (
     <table className="company-table">
+      <colgroup>
+        <col style={{ width: '18%' }} />
+        <col style={{ width: '10%' }} />
+        <col style={{ width: '12%' }} />
+        <col style={{ width: '15%' }} />
+        <col style={{ width: '9%' }} />
+        <col style={{ width: '15%' }} />
+        <col style={{ width: '9%' }} />
+        <col style={{ width: '12%' }} />
+      </colgroup>
       <thead>
         <tr>
           <th>Name</th>
@@ -55,8 +65,8 @@ function CompanyTable({
               onClick={(event) => onRowClick?.(event, company)}
               onDoubleClick={() => onRowDoubleClick?.(company)}
             >
-              <td>
-                {company.name}
+              <td className="cell-truncate">
+                <span title={company.name}>{company.name}</span>
                 {company.no_marketing && (
                   <span
                     className="badge badge-neutral"
@@ -66,11 +76,17 @@ function CompanyTable({
                   </span>
                 )}
               </td>
-              <td>{company.org_number ?? '—'}</td>
-              <td>{COMPANY_FORM_LABELS[company.company_form] ?? company.company_form ?? '—'}</td>
-              <td>{company.address ?? '—'}</td>
-              <td>{company.city ?? '—'}</td>
-              <td>{company.industry_label ?? '—'}</td>
+              <td className="cell-truncate">{company.org_number ?? '—'}</td>
+              <td className="cell-truncate">
+                {COMPANY_FORM_LABELS[company.company_form] ?? company.company_form ?? '—'}
+              </td>
+              <td className="cell-truncate" title={company.address ?? undefined}>
+                {company.address ?? '—'}
+              </td>
+              <td className="cell-truncate">{company.city ?? '—'}</td>
+              <td className="cell-truncate" title={company.industry_label ?? undefined}>
+                {company.industry_label ?? '—'}
+              </td>
               <td>
                 <span className={`badge badge-${status.tone}`}>{status.label}</span>
               </td>

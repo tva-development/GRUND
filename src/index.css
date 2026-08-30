@@ -160,6 +160,7 @@ textarea:focus-visible {
 
 .company-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.9375rem;
 }
@@ -169,6 +170,12 @@ textarea:focus-visible {
   text-align: left;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.company-table td.cell-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .company-table th {
@@ -238,6 +245,7 @@ textarea:focus-visible {
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
+  white-space: normal;
 }
 
 .row-note {
