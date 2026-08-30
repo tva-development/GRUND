@@ -124,12 +124,12 @@ textarea:focus-visible {
 
 .companies-toolbar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
 }
 
 .companies-toolbar .company-search {
-  margin: 4px 0 0;
+  margin: 0;
 }
 
 .row-action {
