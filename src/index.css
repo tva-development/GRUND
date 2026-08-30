@@ -88,3 +88,24 @@ textarea:focus-visible {
   letter-spacing: 0.14em;
   color: var(--navy);
 }
+
+.btn {
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  border-radius: 6px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--navy);
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

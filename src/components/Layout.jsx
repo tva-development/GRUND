@@ -1,11 +1,15 @@
 import { NavLink, Outlet } from 'react-router-dom'
 
+import { useAuth } from '../context/AuthContext'
+
 const navLinkStyle = ({ isActive }) => ({
   color: isActive ? 'var(--ink)' : 'var(--slate)',
   fontWeight: isActive ? 600 : 400,
 })
 
 function Layout() {
+  const { signOut } = useAuth()
+
   return (
     <>
       <header
@@ -19,13 +23,26 @@ function Layout() {
         }}
       >
         <span style={{ fontWeight: 600 }}>TVÅ / GRUND</span>
-        <nav style={{ display: 'flex', gap: 20 }}>
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
           <NavLink to="/companies" style={navLinkStyle}>
             Companies
           </NavLink>
           <NavLink to="/tasks" style={navLinkStyle}>
             Tasks
           </NavLink>
+          <button
+            onClick={signOut}
+            style={{
+              font: 'inherit',
+              color: 'var(--slate)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            Sign out
+          </button>
         </nav>
       </header>
       <main style={{ flex: 1, padding: '24px' }}>
