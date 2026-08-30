@@ -23,7 +23,7 @@ function Login() {
   return (
     <AuthScreen heading="Sign in">
       <p style={{ marginBottom: 20 }}>
-        Sign in with your student union&rsquo;s Google or Microsoft account.
+        Sign in with your Google or Microsoft account.
       </p>
       {error && <p style={{ marginBottom: 16 }}>{error}</p>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
