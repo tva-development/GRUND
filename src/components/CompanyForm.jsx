@@ -109,9 +109,6 @@ function CompanyForm({ initialValues, submitLabel, onSubmit, onCancel }) {
         <button className="btn" type="submit">
           {submitLabel}
         </button>
-        <button type="button" className="link-button" onClick={onCancel}>
-          Cancel
-        </button>
       </div>
     </form>
   )
