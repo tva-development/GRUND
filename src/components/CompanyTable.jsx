@@ -17,7 +17,15 @@ function registryStatus(company) {
   return { label: 'Unknown', tone: 'neutral' }
 }
 
-function CompanyTable({ companies }) {
+function CompanyTable({
+  companies,
+  canRemove,
+  onRemove,
+  selectedCompanyId,
+  onRowClick,
+  onRowDoubleClick,
+  onEdit,
+}) {
   if (companies.length === 0) {
     return <p>No companies match your search yet.</p>
   }
@@ -33,13 +41,20 @@ function CompanyTable({ companies }) {
           <th>City</th>
           <th>Industry</th>
           <th>Status</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
         {companies.map((company) => {
           const status = registryStatus(company)
+          const selected = company.id === selectedCompanyId
           return (
-            <tr key={company.id}>
+            <tr
+              key={company.id}
+              className={selected ? 'company-row-selected' : undefined}
+              onClick={(event) => onRowClick?.(event, company)}
+              onDoubleClick={() => onRowDoubleClick?.(company)}
+            >
               <td>
                 {company.name}
                 {company.no_marketing && (
@@ -58,6 +73,36 @@ function CompanyTable({ companies }) {
               <td>{company.industry_label ?? '—'}</td>
               <td>
                 <span className={`badge badge-${status.tone}`}>{status.label}</span>
+              </td>
+              <td className="company-row-actions">
+                {selected && company.is_manual && (
+                  <button
+                    type="button"
+                    className="row-action"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onEdit(company)
+                    }}
+                  >
+                    Edit
+                  </button>
+                )}
+                {selected && !company.is_manual && (
+                  <span className="row-note">Registry data — not editable</span>
+                )}
+                {canRemove && (
+                  <button
+                    type="button"
+                    className="row-action row-action-danger"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onRemove(company)
+                    }}
+                    title={`Remove ${company.name} from your companies`}
+                  >
+                    Remove
+                  </button>
+                )}
               </td>
             </tr>
           )

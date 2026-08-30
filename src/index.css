@@ -122,6 +122,42 @@ textarea:focus-visible {
   font-size: 0.9375rem;
 }
 
+.companies-toolbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.companies-toolbar .company-search {
+  margin: 4px 0 0;
+}
+
+.row-action {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--slate);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.row-action-danger:hover {
+  color: #a4222c;
+  border-color: #a4222c;
+}
+
+.link-button {
+  font: inherit;
+  color: var(--navy);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .company-table {
   width: 100%;
   border-collapse: collapse;
@@ -183,4 +219,60 @@ textarea:focus-visible {
 
 .company-lookup-prompt p {
   margin: 0 0 10px;
+}
+
+.company-table tbody tr {
+  cursor: pointer;
+}
+
+.company-table tbody tr:hover {
+  background: var(--paper-raised);
+}
+
+.company-row-selected {
+  background: var(--paper-raised);
+}
+
+.company-row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.row-note {
+  font-size: 0.8125rem;
+  color: var(--slate);
+  font-style: italic;
+}
+
+.company-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.company-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: var(--slate);
+}
+
+.company-form-grid input,
+.company-form-grid select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  font-size: 0.9375rem;
+}
+
+.company-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }

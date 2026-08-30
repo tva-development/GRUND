@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
 
+import CompanyForm from '../components/CompanyForm'
 import CompanySearchBar from '../components/CompanySearchBar'
 import CompanyTable from '../components/CompanyTable'
 import { useAuth } from '../context/AuthContext'
 import {
   addCompanyFromRegistry,
+  addManualCompany,
   findInRegistryCache,
   looksLikeOrgNumber,
   lookupCompanyOnBolagsverket,
+  removeCompany,
   searchCompanies,
+  updateCompany,
 } from '../lib/companies'
 
 const LOOKUP_ERROR_MESSAGES = {
@@ -26,6 +30,12 @@ function Companies() {
   const [lookupState, setLookupState] = useState('idle')
   const [registryHit, setRegistryHit] = useState(null)
   const [lookupError, setLookupError] = useState(null)
+
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [selectedCompanyId, setSelectedCompanyId] = useState(null)
+  const [editingCompany, setEditingCompany] = useState(null)
+
+  const isAdmin = appUser?.role === 'admin'
 
   useEffect(() => {
     let active = true
@@ -75,19 +85,126 @@ function Companies() {
   }
 
   async function handleAdd() {
-    const added = await addCompanyFromRegistry(appUser.tenant_id, registryHit)
-    setCompanies((current) => [...current, added].sort((a, b) => a.name.localeCompare(b.name)))
-    setRegistryHit(null)
-    setLookupState('idle')
+    try {
+      const added = await addCompanyFromRegistry(appUser.tenant_id, registryHit)
+      setCompanies((current) => [...current, added].sort((a, b) => a.name.localeCompare(b.name)))
+      setRegistryHit(null)
+      setLookupState('idle')
+    } catch (err) {
+      window.alert(`Could not add company: ${err.message}`)
+    }
+  }
+
+  async function handleAddManual(fields) {
+    try {
+      const added = await addManualCompany(appUser.tenant_id, fields)
+      setCompanies((current) => [...current, added].sort((a, b) => a.name.localeCompare(b.name)))
+      setShowAddForm(false)
+    } catch (err) {
+      window.alert(`Could not add company: ${err.message}`)
+    }
+  }
+
+  async function handleSaveEdit(fields) {
+    try {
+      const updated = await updateCompany(editingCompany.id, fields)
+      setCompanies((current) =>
+        current
+          .map((c) => (c.id === updated.id ? updated : c))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      )
+      setEditingCompany(null)
+    } catch (err) {
+      window.alert(`Could not save changes: ${err.message}`)
+    }
+  }
+
+  async function handleRemove(company) {
+    if (!window.confirm(`Remove ${company.name} from your companies?`)) {
+      return
+    }
+    try {
+      const removed = await removeCompany(company.id)
+      if (removed.length === 0) {
+        window.alert('Only admins can remove companies.')
+        return
+      }
+      setCompanies((current) => current.filter((c) => c.id !== company.id))
+    } catch (err) {
+      window.alert(`Could not remove company: ${err.message}`)
+    }
+  }
+
+  function handleRowClick(event, company) {
+    // A double-click fires two click events before the dblclick — ignore
+    // anything past the first so selection doesn't flicker on/off.
+    if (event.detail > 1) return
+    setSelectedCompanyId((current) => (current === company.id ? null : company.id))
+  }
+
+  function handleRowDoubleClick(company) {
+    if (company.is_manual) {
+      setSelectedCompanyId(company.id)
+      setEditingCompany(company)
+      setShowAddForm(false)
+    }
+  }
+
+  function handleEdit(company) {
+    setEditingCompany(company)
+    setShowAddForm(false)
   }
 
   return (
     <>
       <span className="eyebrow">Companies</span>
       <h1>Companies</h1>
-      <CompanySearchBar value={query} onChange={setQuery} />
 
-      {loading ? <p>Loading…</p> : <CompanyTable companies={companies} />}
+      <div className="companies-toolbar">
+        <CompanySearchBar value={query} onChange={setQuery} />
+        <button
+          type="button"
+          className="btn"
+          onClick={() => {
+            setShowAddForm((current) => !current)
+            setEditingCompany(null)
+          }}
+        >
+          {showAddForm ? 'Cancel' : '+ Add company'}
+        </button>
+      </div>
+
+      {showAddForm && (
+        <CompanyForm
+          initialValues={{}}
+          submitLabel="Add company"
+          onSubmit={handleAddManual}
+          onCancel={() => setShowAddForm(false)}
+        />
+      )}
+
+      {editingCompany && (
+        <CompanyForm
+          initialValues={editingCompany}
+          submitLabel="Save changes"
+          onSubmit={handleSaveEdit}
+          onCancel={() => setEditingCompany(null)}
+        />
+      )}
+
+      {loading ? (
+        <p>Loading…</p>
+      ) : (
+        <CompanyTable
+          companies={companies}
+          canRemove={isAdmin}
+          onRemove={handleRemove}
+          selectedCompanyId={selectedCompanyId}
+          onRowClick={handleRowClick}
+          onRowDoubleClick={handleRowDoubleClick}
+          onEdit={handleEdit}
+        />
+      )}
 
       {lookupState === 'not-in-registry' && (
         <div className="company-lookup-prompt">
