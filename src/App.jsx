@@ -1,31 +1,20 @@
-import { useEffect, useState } from 'react'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
-import { supabase } from './lib/supabaseClient'
+import Layout from './components/Layout'
+import Companies from './pages/Companies'
+import Tasks from './pages/Tasks'
 
 function App() {
-  const [instruments, setInstruments] = useState([])
-
-  useEffect(() => {
-    getInstruments()
-  }, [])
-
-  async function getInstruments() {
-    const { data, error } = await supabase.from('instruments').select()
-
-    if (error) {
-      console.error(error)
-      return
-    }
-
-    setInstruments(data)
-  }
-
   return (
-    <ul>
-      {instruments.map((instrument) => (
-        <li key={instrument.id}>{instrument.name}</li>
-      ))}
-    </ul>
+    <BrowserRouter>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Navigate to="/companies" replace />} />
+          <Route path="/companies" element={<Companies />} />
+          <Route path="/tasks" element={<Tasks />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   )
 }
 
