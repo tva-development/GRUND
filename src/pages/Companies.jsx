@@ -1,9 +1,118 @@
+import { useEffect, useState } from 'react'
+
+import CompanySearchBar from '../components/CompanySearchBar'
+import CompanyTable from '../components/CompanyTable'
+import { useAuth } from '../context/AuthContext'
+import {
+  addCompanyFromRegistry,
+  findInRegistryCache,
+  looksLikeOrgNumber,
+  lookupCompanyOnBolagsverket,
+  searchCompanies,
+} from '../lib/companies'
+
+const LOOKUP_ERROR_MESSAGES = {
+  INVALID_ORG_NUMBER: "That doesn't look like a valid Swedish org number.",
+  NOT_FOUND: 'Bolagsverket has no record of that org number.',
+  LOOKUP_FAILED: 'The lookup failed — try again in a moment.',
+}
+
 function Companies() {
+  const { appUser } = useAuth()
+  const [query, setQuery] = useState('')
+  const [companies, setCompanies] = useState([])
+  const [loading, setLoading] = useState(true)
+  // 'idle' | 'checking' | 'not-in-registry' | 'looking-up' | 'found-in-registry' | 'error'
+  const [lookupState, setLookupState] = useState('idle')
+  const [registryHit, setRegistryHit] = useState(null)
+  const [lookupError, setLookupError] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    const timeout = setTimeout(async () => {
+      setLoading(true)
+      const results = await searchCompanies(query)
+      if (!active) return
+      setCompanies(results)
+      setLoading(false)
+
+      const trimmed = query.trim()
+      if (!trimmed || !looksLikeOrgNumber(trimmed) || results.length > 0) {
+        setLookupState('idle')
+        setRegistryHit(null)
+        return
+      }
+
+      setLookupState('checking')
+      const cached = await findInRegistryCache(trimmed)
+      if (!active) return
+      if (cached) {
+        setRegistryHit(cached)
+        setLookupState('found-in-registry')
+      } else {
+        setRegistryHit(null)
+        setLookupState('not-in-registry')
+      }
+    }, 300)
+
+    return () => {
+      active = false
+      clearTimeout(timeout)
+    }
+  }, [query])
+
+  async function handleLookup() {
+    setLookupState('looking-up')
+    setLookupError(null)
+    try {
+      const row = await lookupCompanyOnBolagsverket(query.trim())
+      setRegistryHit(row)
+      setLookupState('found-in-registry')
+    } catch (err) {
+      setLookupError(LOOKUP_ERROR_MESSAGES[err.message] ?? LOOKUP_ERROR_MESSAGES.LOOKUP_FAILED)
+      setLookupState('error')
+    }
+  }
+
+  async function handleAdd() {
+    const added = await addCompanyFromRegistry(appUser.tenant_id, registryHit)
+    setCompanies((current) => [...current, added].sort((a, b) => a.name.localeCompare(b.name)))
+    setRegistryHit(null)
+    setLookupState('idle')
+  }
+
   return (
     <>
       <span className="eyebrow">Companies</span>
       <h1>Companies</h1>
-      <p>Not wired up yet — this page will list companies for your tenant.</p>
+      <CompanySearchBar value={query} onChange={setQuery} />
+
+      {loading ? <p>Loading…</p> : <CompanyTable companies={companies} />}
+
+      {lookupState === 'not-in-registry' && (
+        <div className="company-lookup-prompt">
+          <p>Not in your list or the shared registry yet.</p>
+          <button className="btn" onClick={handleLookup}>
+            Look up {query.trim()} on Bolagsverket
+          </button>
+        </div>
+      )}
+
+      {lookupState === 'looking-up' && <p>Looking up {query.trim()} on Bolagsverket…</p>}
+
+      {lookupState === 'error' && <p>{lookupError}</p>}
+
+      {lookupState === 'found-in-registry' && registryHit && (
+        <div className="company-lookup-prompt">
+          <p>
+            Found in the shared registry: <strong>{registryHit.name}</strong> (
+            {registryHit.org_number}) — not yet in your list.
+          </p>
+          <button className="btn" onClick={handleAdd}>
+            Add to my companies
+          </button>
+        </div>
+      )}
     </>
   )
 }

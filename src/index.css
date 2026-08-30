@@ -109,3 +109,78 @@ textarea:focus-visible {
   cursor: default;
   opacity: 0.6;
 }
+
+.company-search {
+  width: 100%;
+  max-width: 420px;
+  padding: 10px 12px;
+  margin: 4px 0 20px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  font-size: 0.9375rem;
+}
+
+.company-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.company-table th,
+.company-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.company-table th {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--slate);
+  font-weight: 500;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badge-good {
+  background: #dcf3e4;
+  color: #1a7a3f;
+}
+
+.badge-bad {
+  background: #fbdede;
+  color: #a4222c;
+}
+
+.badge-warn {
+  background: #fbecd0;
+  color: #93590a;
+}
+
+.badge-neutral {
+  background: var(--border);
+  color: var(--slate);
+}
+
+.company-lookup-prompt {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-raised);
+}
+
+.company-lookup-prompt p {
+  margin: 0 0 10px;
+}
