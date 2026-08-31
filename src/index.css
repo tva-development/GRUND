@@ -204,8 +204,23 @@ textarea:focus-visible {
   user-select: none;
 }
 
-.col-resize-handle:hover {
-  background: var(--border);
+/* A persistent line marks every draggable boundary — hover-only affordance
+   means someone has to already know where to look before they find it. */
+.col-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  width: 2px;
+  height: 2em;
+  transform: translateY(-50%);
+  background: var(--slate);
+  opacity: 0.4;
+}
+
+.col-resize-handle:hover::after {
+  background: var(--navy);
+  opacity: 1;
 }
 
 /* While dragging, the cursor shouldn't flicker as it passes over text. */
