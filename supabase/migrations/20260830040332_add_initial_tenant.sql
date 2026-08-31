@@ -1,8 +1,10 @@
 -- ============================================================================
--- Seed a development tenant for TVÅ's own testing (tvadevelopment.se).
--- Not a real student union — lets the team verify the login flow end-to-end
--- with their own accounts before onboarding an actual union.
+-- Intentionally empty.
+--
+-- This migration used to insert the TVÅ Development tenant
+-- (tvadevelopment.se). That is seed data, not schema, so it moved to
+-- supabase/seed.sql, which runs on `npx supabase db reset`.
+--
+-- The file is kept (rather than deleted) so databases that already applied
+-- this version keep a valid supabase_migrations.schema_migrations row.
 -- ============================================================================
-
-insert into tenant (name, primary_domain, allowed_identity_providers)
-values ('TVÅ Development', 'tvadevelopment.se', array['google', 'microsoft']);
