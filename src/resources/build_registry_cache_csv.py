@@ -1,27 +1,25 @@
 """
-Combines Bolagsverket's bulk export with SCB's bulk export into a single CSV
-ready for \\copy into company_registry_cache.
+Combines Bolagsverket's bulk export with SCB's bulk export into a CSV ready
+for \\copy into company_registry_cache -- see load_registry_cache.sql for
+that step.
 
 Bolagsverket supplies: org_number, name, company_form, address, city, zip,
-registered_at, deregistered_at, deregistration_reason, in_liquidation, and
-business_description (verksamhetsbeskrivning -- free text the company writes
-about itself).
+registered_at, business_description (verksamhetsbeskrivning -- free text the
+company writes about itself).
 
-SCB supplies: sni_code (Ng1), is_active (FtgStat), no_marketing
-(Reklamsparrtyp).
+SCB supplies: sni_code (Ng1), no_marketing (Reklamsparrtyp).
 
 industry_label is derived from sni_code via an SNI 2025 code list, so it
 holds the same kind of official label the live tier-3 lookup writes.
+
+company_registry_cache has no columns for deregistration/liquidation/activity
+status -- those values are still captured, just inside the `raw` jsonb blob
+instead of their own columns.
 
 USAGE:
     1. Point BOLAGSVERKET_FILE and SCB_FILE below at your two downloaded files.
     2. Optionally save an SNI code list as sni_2025_koder.csv (see below).
     3. python build_registry_cache_csv.py
-    4. \\copy staging_registry (org_number, name, company_form, sni_code,
-       industry_label, business_description, address, city, zip, is_active,
-       in_liquidation, no_marketing, deregistered_at, deregistration_reason,
-       registered_at, last_fetched_at, raw)
-       from 'company_registry_cache_import.csv' with (format csv, header)
 """
 
 import csv
@@ -44,26 +42,15 @@ OUTPUT_FILE = SCRIPT_DIR / "company_registry_cache_import_2.csv"
 # NULL for every bulk row, and gets filled in per company by tier-3 later.
 SNI_LOOKUP_FILE = SCRIPT_DIR / "sni_2025_koder.csv"
 
-# ---------------------------------------------------------------------------
-# Code mappings, per SCB's published variable documentation.
-#
-# FtgStat (Företagsstatus) -- "verksam" means registered for moms, F-skatt
-# and/or as an employer:
-#     0 = har aldrig varit verksam
-#     1 = är verksam enligt företagsregistrets kriterier
-#     9 = ej verksam
-# Only 1 counts as active.
-#
-# Reklamsparrtyp -- note this reads the opposite way round to how the column
-# is named, so it's easy to invert by accident:
+# Reklamsparrtyp, per SCB's published variable documentation -- note this
+# reads the opposite way round to how the column is named, so it's easy to
+# invert by accident:
 #     1 = företaget har INTE frånsagt sig reklam  -> no_marketing = false
 #     2 = företaget HAR frånsagt sig reklam       -> no_marketing = true
-# ---------------------------------------------------------------------------
-ACTIVE_FTGSTAT_CODES = {"1"}
 NO_MARKETING_REKLAMSPARR_CODES = {"2"}
 
-# A blank FtgStat/Reklamsparrtyp becomes NULL rather than false, matching how
-# the live edge function treats a missing JA/NEJ (janejToBoolean returns null).
+# A blank Reklamsparrtyp becomes NULL rather than false, matching how the
+# live edge function treats a missing JA/NEJ (janejToBoolean returns null).
 
 # Bulk rows are a baseline, NOT a fetch from Bolagsverket's API. Left to the
 # column default of now(), every imported company would count as fresh under
@@ -82,11 +69,7 @@ OUTPUT_COLUMNS = [
     "address",
     "city",
     "zip",
-    "is_active",
-    "in_liquidation",
     "no_marketing",
-    "deregistered_at",
-    "deregistration_reason",
     "registered_at",
     "last_fetched_at",
     "raw",
@@ -189,11 +172,6 @@ def process_bolagsverket_row(row):
         "address": address,
         "city": city,
         "zip": zip_code,
-        "in_liquidation": to_pg_bool(
-            row.get("pagandeAvvecklingsEllerOmstruktureringsforfarande")
-        ),
-        "deregistered_at": row.get("avregistreringsdatum") or None,
-        "deregistration_reason": code_only(row.get("avregistreringsorsak")),
         "registered_at": row.get("registreringsdatum") or None,
         "bolagsverket_raw": {
             "organisationsidentitet_raw": row.get("organisationsidentitet"),
@@ -201,7 +179,13 @@ def process_bolagsverket_row(row):
             "registreringsland": row.get("registreringsland") or None,
             "organisationsnamn_raw": row.get("organisationsnamn"),
             "organisationsform_raw": row.get("organisationsform"),
+            # No output columns for these anymore -- kept raw so they're
+            # recoverable without re-running the whole pipeline.
+            "avregistreringsdatum_raw": row.get("avregistreringsdatum") or None,
             "avregistreringsorsak_raw": row.get("avregistreringsorsak"),
+            "pagaende_avveckling_raw": row.get(
+                "pagandeAvvecklingsEllerOmstruktureringsforfarande"
+            ),
             "postadress_raw": row.get("postadress"),
         },
     }
@@ -268,7 +252,7 @@ def scb_flag(value, true_codes):
 
 
 def load_scb():
-    """Returns {org_number: (sni_code, is_active, no_marketing, extras)}.
+    """Returns {org_number: (sni_code, no_marketing, extras)}.
     Deliberately compact -- this sits in memory alongside the much larger
     Bolagsverket dict, so it holds only what's actually used."""
     by_org = {}
@@ -285,13 +269,13 @@ def load_scb():
             extra_ng = [row.get(f"Ng{i}") for i in range(2, 6)]
             by_org[org_number] = (
                 row.get("Ng1") or None,
-                scb_flag(row.get("FtgStat"), ACTIVE_FTGSTAT_CODES),
                 scb_flag(row.get("Reklamsparrtyp"), NO_MARKETING_REKLAMSPARR_CODES),
                 {
                     "jur_form": row.get("JurForm") or None,  # SCB's codelist, NOT Bolagsverket's
                     "foretagsnamn": row.get("Foretagsnamn") or None,
                     "co_adress": row.get("COAdress") or None,
                     "je_stat": row.get("JEStat") or None,
+                    "ftg_stat_raw": row.get("FtgStat") or None,  # activity status, no output column anymore
                     "ng_ovriga": [c for c in extra_ng if c] or None,
                 },
             )
@@ -359,6 +343,40 @@ def clean_dict_values(val):
         return clean_text(val)
     return val
 
+def build_row(org_number, record, scb_match, sni_labels):
+    """Merges one Bolagsverket record with its SCB match (if any) into an
+    OUTPUT_COLUMNS-shaped row. Returns (row, matched, labelled) so main() can
+    tally stats without recomputing anything."""
+    sni_code = no_marketing = None
+    scb_extras = None
+    if scb_match is not None:
+        sni_code, no_marketing, scb_extras = scb_match
+
+    industry_label = sni_labels.get(normalize_sni_code(sni_code)) if sni_code else None
+
+    raw = record["bolagsverket_raw"]
+    if scb_extras:
+        raw = {**raw, "scb": scb_extras}
+    raw_json_str = json.dumps(clean_dict_values(raw), ensure_ascii=False)
+
+    row = [
+        org_number,
+        clean_text(record["name"]),
+        clean_text(record["company_form"]),
+        sni_code,
+        clean_text(industry_label) if industry_label else "",
+        clean_text(record["business_description"]),
+        clean_text(record["address"]),
+        clean_text(record["city"]),
+        clean_text(record["zip"]),
+        no_marketing if no_marketing is not None else "",
+        record["registered_at"],
+        BULK_LAST_FETCHED_AT,
+        raw_json_str,
+    ]
+    return row, scb_match is not None, bool(industry_label)
+
+
 def main():
     for path in (BOLAGSVERKET_FILE, SCB_FILE):
         if not path.exists():
@@ -370,58 +388,22 @@ def main():
     scb = load_scb()
     sni_labels = load_sni_labels()
 
-    enriched = 0
-    labelled = 0
+    enriched = labelled = 0
 
     with open(OUTPUT_FILE, "w", encoding="utf-8", newline="") as outfile:
         writer = csv.writer(outfile)
         writer.writerow(OUTPUT_COLUMNS)
 
         for org_number, record in bolagsverket.items():
-            sni_code = is_active = no_marketing = None
-            scb_extras = None
-
-            match = scb.get(org_number)
-            if match is not None:
-                sni_code, is_active, no_marketing, scb_extras = match
-                enriched += 1
-
-            industry_label = sni_labels.get(normalize_sni_code(sni_code)) if sni_code else None
-            if industry_label:
-                labelled += 1
-
-            raw = record["bolagsverket_raw"]
-            if scb_extras:
-                raw = {**raw, "scb": scb_extras}
-
-            # Sanitize the JSON raw object recursively
-            cleaned_raw = clean_dict_values(raw)
-            raw_json_str = json.dumps(cleaned_raw, ensure_ascii=False)
-
-            writer.writerow([
-                org_number,
-                clean_text(record["name"]),
-                clean_text(record["company_form"]),
-                sni_code,
-                clean_text(industry_label) if industry_label else "",
-                clean_text(record["business_description"]),
-                clean_text(record["address"]),
-                clean_text(record["city"]),
-                clean_text(record["zip"]),
-                is_active if is_active is not None else "",
-                record["in_liquidation"],
-                no_marketing if no_marketing is not None else "",
-                record["deregistered_at"],
-                record["deregistration_reason"],
-                record["registered_at"],
-                BULK_LAST_FETCHED_AT,
-                raw_json_str,
-            ])
+            row, matched, has_label = build_row(org_number, record, scb.get(org_number), sni_labels)
+            writer.writerow(row)
+            enriched += matched
+            labelled += has_label
 
     total = len(bolagsverket)
     print(f"\nWrote {total} rows to {OUTPUT_FILE.name}")
-    print(f"  {enriched} matched an SCB row and carry sni_code/is_active/no_marketing")
-    print(f"  {total - enriched} had no SCB match (those three columns are NULL)")
+    print(f"  {enriched} matched an SCB row and carry sni_code/no_marketing")
+    print(f"  {total - enriched} had no SCB match")
     print(f"  {labelled} resolved an industry_label from their SNI code")
     print(f"  {len(scb) - enriched} SCB rows matched nothing in the Bolagsverket file")
 
