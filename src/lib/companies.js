@@ -4,6 +4,29 @@ import { supabase } from './supabaseClient'
 // personnummer/samordningsnummer (12 digits), hyphens allowed anywhere in the input.
 const ORG_NUMBER_PATTERN = /^\d[\d\s-]{8,}$/
 
+// How many registry rows a single search may return. "bygg" alone matches
+// 31 294 of the 882 000 cached companies, so this is a display cap as much as
+// a performance one — nobody scrolls past the first screen of a term that
+// broad, they refine it instead.
+export const REGISTRY_RESULT_LIMIT = 50
+
+// Below this, a name search matches so much of the register that the result is
+// noise rather than an answer. Org-number searches are exempt — those are
+// exact and always worth running.
+const MIN_REGISTRY_QUERY_LENGTH = 2
+
+// `company.company_form` has a check constraint listing eight values, while the
+// registry carries 25 distinct Bolagsverket codes (FL, KHF, OFB, BAB …) across
+// ~3 000 companies. Promoting one of those verbatim would fail the constraint,
+// so anything outside the tenant vocabulary lands as 'other'. The real code
+// stays visible in the registry row it came from.
+const TENANT_COMPANY_FORMS = new Set(['AB', 'HB', 'KB', 'EK', 'BRF', 'E', 'none', 'other'])
+
+function tenantCompanyForm(form) {
+  if (!form) return 'none'
+  return TENANT_COMPANY_FORMS.has(form) ? form : 'other'
+}
+
 export function looksLikeOrgNumber(query) {
   return ORG_NUMBER_PATTERN.test(query.trim())
 }
@@ -12,32 +35,79 @@ function normalizeOrgNumber(query) {
   return query.replace(/[\s-]/g, '')
 }
 
-// Tier 1 — the tenant's own company list. Always what the table renders.
+// The table renders tenant rows and registry rows side by side, but only the
+// former have a uuid. `rowKey` gives every row something stable to key and
+// select on; `tracked` is what the UI branches on to decide whether a row
+// offers Remove/Edit or "Add to my companies".
+function asTenantRow(row) {
+  return { ...row, tracked: true, rowKey: `company:${row.id}` }
+}
+
+function asRegistryRow(row) {
+  return { ...row, tracked: false, rowKey: `registry:${row.org_number}` }
+}
+
+function byName(a, b) {
+  return (a.name ?? '').localeCompare(b.name ?? '', 'sv')
+}
+
+// Tier 1 + tier 2 in one pass — the tenant's own list, plus the shared registry
+// cache for everything they haven't added.
+//
+// An empty box shows only the tenant's own companies. Listing the register
+// itself would mean paging through 882 000 rows, which is a browser, not a CRM
+// list; the register becomes reachable the moment you actually search for
+// something.
+//
+// Tenant rows always come first and are never capped — your own companies
+// shouldn't fall off the end because a common word matched half of Sweden.
 export async function searchCompanies(query) {
   const trimmed = query.trim()
 
   if (!trimmed) {
     const { data, error } = await supabase.from('company').select('*').order('name')
     if (error) throw error
-    return data
+    return data.map(asTenantRow)
   }
 
-  if (looksLikeOrgNumber(trimmed)) {
-    const { data, error } = await supabase
-      .from('company')
-      .select('*')
-      .eq('org_number', normalizeOrgNumber(trimmed))
-    if (error) throw error
-    return data
-  }
+  const isOrgNumber = looksLikeOrgNumber(trimmed)
+  const normalized = normalizeOrgNumber(trimmed)
 
-  const { data, error } = await supabase
-    .from('company')
-    .select('*')
-    .ilike('name', `%${trimmed}%`)
-    .order('name')
-  if (error) throw error
-  return data
+  const tenantQuery = isOrgNumber
+    ? supabase.from('company').select('*').eq('org_number', normalized)
+    : supabase.from('company').select('*').ilike('name', `%${trimmed}%`).order('name')
+
+  // Deliberately unordered. `order('name')` forces Postgres to fetch and sort
+  // every match before applying the limit — 335 ms for a broad term — while
+  // the unordered form stops at the first 50 the trigram index yields, in 3–11
+  // ms. The page sorts those 50 itself, which costs nothing.
+  const searchesRegistry = isOrgNumber || trimmed.length >= MIN_REGISTRY_QUERY_LENGTH
+  const registryQuery = !searchesRegistry
+    ? null
+    : isOrgNumber
+      ? supabase.from('company_registry_cache').select('*').eq('org_number', normalized)
+      : supabase
+          .from('company_registry_cache')
+          .select('*')
+          .ilike('name', `%${trimmed}%`)
+          .limit(REGISTRY_RESULT_LIMIT)
+
+  const [tenantResult, registryResult] = await Promise.all([tenantQuery, registryQuery])
+
+  if (tenantResult.error) throw tenantResult.error
+  if (registryResult?.error) throw registryResult.error
+
+  const tenantRows = tenantResult.data.map(asTenantRow)
+
+  // A company the tenant already tracks must not appear twice — their own row
+  // is the one with status and actions on it, so it wins.
+  const tracked = new Set(tenantRows.map((row) => row.org_number).filter(Boolean))
+  const registryRows = (registryResult?.data ?? [])
+    .filter((row) => !tracked.has(row.org_number))
+    .map(asRegistryRow)
+    .sort(byName)
+
+  return [...tenantRows, ...registryRows]
 }
 
 // Tier 2 — the shared, read-only registry cache. Anyone's prior lookup.
@@ -75,7 +145,7 @@ export async function addCompanyFromRegistry(tenantId, registryRow) {
       tenant_id: tenantId,
       org_number: registryRow.org_number,
       name: registryRow.name,
-      company_form: registryRow.company_form ?? 'none',
+      company_form: tenantCompanyForm(registryRow.company_form),
       sni_code: registryRow.sni_code,
       industry_label: registryRow.industry_label,
       city: registryRow.city,
@@ -93,7 +163,7 @@ export async function addCompanyFromRegistry(tenantId, registryRow) {
     .single()
 
   if (error) throw error
-  return data
+  return asTenantRow(data)
 }
 
 // Shared field mapping for manual add/edit. org_number is normalized the
@@ -124,7 +194,7 @@ export async function addManualCompany(tenantId, fields) {
     .single()
 
   if (error) throw error
-  return data
+  return asTenantRow(data)
 }
 
 // Edits a manually-added company's info. The UI only ever calls this for
@@ -142,7 +212,7 @@ export async function updateCompany(companyId, fields) {
     .single()
 
   if (error) throw error
-  return data
+  return asTenantRow(data)
 }
 
 // Removes a company from the tenant's own list. Only ever affects the

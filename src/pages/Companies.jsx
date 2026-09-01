@@ -7,7 +7,6 @@ import { useAuth } from '../context/AuthContext'
 import {
   addCompanyFromRegistry,
   addManualCompany,
-  findInRegistryCache,
   looksLikeOrgNumber,
   lookupCompanyOnBolagsverket,
   removeCompany,
@@ -26,14 +25,16 @@ function Companies() {
   const [query, setQuery] = useState('')
   const [companies, setCompanies] = useState([])
   const [loading, setLoading] = useState(true)
-  // 'idle' | 'checking' | 'not-in-registry' | 'looking-up' | 'found-in-registry' | 'error'
+  // 'idle' | 'not-in-registry' | 'looking-up' | 'found-in-registry' | 'error'
   const [lookupState, setLookupState] = useState('idle')
   const [registryHit, setRegistryHit] = useState(null)
   const [lookupError, setLookupError] = useState(null)
 
   const [showAddForm, setShowAddForm] = useState(false)
-  const [selectedCompanyId, setSelectedCompanyId] = useState(null)
+  const [selectedRowKey, setSelectedRowKey] = useState(null)
   const [editingCompany, setEditingCompany] = useState(null)
+  const [reloadToken, setReloadToken] = useState(0)
+  const [searchError, setSearchError] = useState(null)
 
   const isAdmin = appUser?.role === 'admin'
 
@@ -41,35 +42,40 @@ function Companies() {
     let active = true
     const timeout = setTimeout(async () => {
       setLoading(true)
-      const results = await searchCompanies(query)
+      let results
+      try {
+        results = await searchCompanies(query)
+      } catch (err) {
+        // The search now spans the shared registry too, so a failure here is
+        // no longer just "your own list is empty" — surface it rather than
+        // leaving the table silently stuck on its previous contents.
+        if (!active) return
+        setSearchError(err.message ?? 'Search failed')
+        setCompanies([])
+        setLoading(false)
+        setLookupState('idle')
+        return
+      }
       if (!active) return
+      setSearchError(null)
       setCompanies(results)
       setLoading(false)
 
+      // searchCompanies now covers tiers 1 and 2 in one go, so an empty result
+      // for an org number already means "not in your list and not in the
+      // shared registry either". The only thing left to try is tier 3.
       const trimmed = query.trim()
-      if (!trimmed || !looksLikeOrgNumber(trimmed) || results.length > 0) {
-        setLookupState('idle')
-        setRegistryHit(null)
-        return
-      }
-
-      setLookupState('checking')
-      const cached = await findInRegistryCache(trimmed)
-      if (!active) return
-      if (cached) {
-        setRegistryHit(cached)
-        setLookupState('found-in-registry')
-      } else {
-        setRegistryHit(null)
-        setLookupState('not-in-registry')
-      }
+      setRegistryHit(null)
+      setLookupState(
+        trimmed && looksLikeOrgNumber(trimmed) && results.length === 0 ? 'not-in-registry' : 'idle',
+      )
     }, 300)
 
     return () => {
       active = false
       clearTimeout(timeout)
     }
-  }, [query])
+  }, [query, reloadToken])
 
   async function handleLookup() {
     setLookupState('looking-up')
@@ -84,12 +90,20 @@ function Companies() {
     }
   }
 
-  async function handleAdd() {
+  // Adding or removing changes which rows count as tracked, and therefore how
+  // searchCompanies merges and de-duplicates them. Re-running the search is
+  // what keeps that logic in one place instead of splicing the list by hand
+  // here and getting a row that shows as both tracked and untracked.
+  function reload() {
+    setReloadToken((current) => current + 1)
+  }
+
+  async function handleAdd(registryRow) {
     try {
-      const added = await addCompanyFromRegistry(appUser.tenant_id, registryHit)
-      setCompanies((current) => [...current, added].sort((a, b) => a.name.localeCompare(b.name)))
+      await addCompanyFromRegistry(appUser.tenant_id, registryRow)
       setRegistryHit(null)
       setLookupState('idle')
+      reload()
     } catch (err) {
       window.alert(`Could not add company: ${err.message}`)
     }
@@ -97,9 +111,9 @@ function Companies() {
 
   async function handleAddManual(fields) {
     try {
-      const added = await addManualCompany(appUser.tenant_id, fields)
-      setCompanies((current) => [...current, added].sort((a, b) => a.name.localeCompare(b.name)))
+      await addManualCompany(appUser.tenant_id, fields)
       setShowAddForm(false)
+      reload()
     } catch (err) {
       window.alert(`Could not add company: ${err.message}`)
     }
@@ -107,13 +121,9 @@ function Companies() {
 
   async function handleSaveEdit(fields) {
     try {
-      const updated = await updateCompany(editingCompany.id, fields)
-      setCompanies((current) =>
-        current
-          .map((c) => (c.id === updated.id ? updated : c))
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      )
+      await updateCompany(editingCompany.id, fields)
       setEditingCompany(null)
+      reload()
     } catch (err) {
       window.alert(`Could not save changes: ${err.message}`)
     }
@@ -129,7 +139,8 @@ function Companies() {
         window.alert('Only admins can remove companies.')
         return
       }
-      setCompanies((current) => current.filter((c) => c.id !== company.id))
+      setSelectedRowKey(null)
+      reload()
     } catch (err) {
       window.alert(`Could not remove company: ${err.message}`)
     }
@@ -139,12 +150,14 @@ function Companies() {
     // A double-click fires two click events before the dblclick — ignore
     // anything past the first so selection doesn't flicker on/off.
     if (event.detail > 1) return
-    setSelectedCompanyId((current) => (current === company.id ? null : company.id))
+    setSelectedRowKey((current) => (current === company.rowKey ? null : company.rowKey))
   }
 
   function handleRowDoubleClick(company) {
-    if (company.is_manual) {
-      setSelectedCompanyId(company.id)
+    // Only the tenant's own manually-added rows are editable. A registry row
+    // isn't theirs yet, and a registry-sourced one mirrors Bolagsverket.
+    if (company.tracked && company.is_manual) {
+      setSelectedRowKey(company.rowKey)
       setEditingCompany(company)
       setShowAddForm(false)
     }
@@ -191,6 +204,8 @@ function Companies() {
         />
       )}
 
+      {searchError && <p className="company-search-error">Search failed: {searchError}</p>}
+
       {loading ? (
         <p>Loading…</p>
       ) : (
@@ -198,7 +213,8 @@ function Companies() {
           companies={companies}
           canRemove={isAdmin}
           onRemove={handleRemove}
-          selectedCompanyId={selectedCompanyId}
+          onAdd={handleAdd}
+          selectedRowKey={selectedRowKey}
           onRowClick={handleRowClick}
           onRowDoubleClick={handleRowDoubleClick}
           onEdit={handleEdit}
@@ -221,10 +237,10 @@ function Companies() {
       {lookupState === 'found-in-registry' && registryHit && (
         <div className="company-lookup-prompt">
           <p>
-            Found in the shared registry: <strong>{registryHit.name}</strong> (
+            Fetched from Bolagsverket: <strong>{registryHit.name}</strong> (
             {registryHit.org_number}) — not yet in your list.
           </p>
-          <button className="btn" onClick={handleAdd}>
+          <button className="btn" onClick={() => handleAdd(registryHit)}>
             Add to my companies
           </button>
         </div>
