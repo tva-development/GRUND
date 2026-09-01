@@ -27,3 +27,12 @@ dist-ssr
 # Claude Code local config
 .claude/
 CLAUDE.md
+
+# Python
+__pycache__/
+*.pyc
+
+# Registerimportens bulkfiler och genererad CSV — 1,2 GB in, ett par hundra
+# MB ut. sni_2025_koder.csv är liten och ska vara kvar i repot.
+src/resources/*.txt
+src/resources/company_registry_cache_import*.csv
