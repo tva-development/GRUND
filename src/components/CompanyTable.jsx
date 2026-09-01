@@ -39,7 +39,8 @@ function CompanyTable({
   companies,
   canRemove,
   onRemove,
-  selectedCompanyId,
+  onAdd,
+  selectedRowKey,
   onRowClick,
   onRowDoubleClick,
   onEdit,
@@ -103,11 +104,19 @@ function CompanyTable({
         <tbody>
           {companies.map((company) => {
             const status = registryStatus(company)
-            const selected = company.id === selectedCompanyId
+            // Registry rows have no uuid, so both keying and selection go via
+            // rowKey — every row in the list has one, tenant or registry.
+            const selected = company.rowKey === selectedRowKey
+            const className = [
+              selected ? 'company-row-selected' : null,
+              company.tracked ? null : 'company-row-untracked',
+            ]
+              .filter(Boolean)
+              .join(' ')
             return (
               <tr
-                key={company.id}
-                className={selected ? 'company-row-selected' : undefined}
+                key={company.rowKey}
+                className={className || undefined}
                 onClick={(event) => onRowClick?.(event, company)}
                 onDoubleClick={() => onRowDoubleClick?.(company)}
               >
@@ -141,7 +150,23 @@ function CompanyTable({
                   <span className={`badge badge-${status.tone}`}>{status.label}</span>
                 </td>
                 <td className="company-row-actions">
-                  {selected && company.is_manual && (
+                  {/* A registry row isn't the tenant's yet — the only thing it
+                      offers is becoming theirs. Everything else (status, edit,
+                      remove) needs a `company` row to hang off. */}
+                  {!company.tracked && (
+                    <button
+                      type="button"
+                      className="row-action"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onAdd(company)
+                      }}
+                      title={`Add ${company.name} to your companies`}
+                    >
+                      + Add to my companies
+                    </button>
+                  )}
+                  {company.tracked && selected && company.is_manual && (
                     <button
                       type="button"
                       className="row-action"
@@ -153,12 +178,12 @@ function CompanyTable({
                       Edit
                     </button>
                   )}
-                  {selected && !company.is_manual && (
+                  {company.tracked && selected && !company.is_manual && (
                     <span className="row-note" title="Registry data from Bolagsverket — not editable">
                       Registry data
                     </span>
                   )}
-                  {canRemove && (
+                  {company.tracked && canRemove && (
                     <button
                       type="button"
                       className="row-action row-action-danger"
