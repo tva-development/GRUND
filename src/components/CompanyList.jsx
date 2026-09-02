@@ -206,8 +206,7 @@ function CompanyList({
                   )}
                   {company.tracked &&
                     onSetInContact &&
-                    company.eligibility?.kind !== 'in-contact' &&
-                    company.eligibility?.kind !== 'contacting' && (
+                    (!company.eligibility || company.eligibility.kind === 'available') && (
                       <button type="button" className="row-action" onClick={() => onSetInContact(company)}>
                         In contact
                       </button>
