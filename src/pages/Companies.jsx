@@ -30,16 +30,22 @@ import {
 // reversible) always wins over contact_eligibility (the committed, 14-day
 // cooldown state from an actual log_interaction() call) — it's the more
 // current fact. Falls through to eligibility only once no one's marked it.
+//
+// 'in-contact' (red) means the marker specifically — it's the only state
+// that's still reversible, which is what the "Not in contact anymore"
+// button keys off. Once a cooldown actually commits, self or teammate alike
+// show as 'cooldown' (amber) — there's nothing left to undo at that point,
+// so it shouldn't keep reading as the same actionable red state.
 function eligibilityBadge(company, eligibility, currentUserId, inContactNames) {
   if (company.in_contact_by) {
     return company.in_contact_by === currentUserId
-      ? { kind: 'in-contact', uncommitted: true }
+      ? { kind: 'in-contact' }
       : { kind: 'contacting', contactedBy: inContactNames[company.in_contact_by] ?? 'a teammate' }
   }
   if (!eligibility) return null
   if (eligibility.available) return { kind: 'available' }
-  if (eligibility.last_user_id === currentUserId) return { kind: 'in-contact', uncommitted: false }
-  return { kind: 'cooldown', daysLeft: eligibility.days_left, contactedBy: eligibility.lastUserName }
+  const isSelf = eligibility.last_user_id === currentUserId
+  return { kind: 'cooldown', daysLeft: eligibility.days_left, contactedBy: isSelf ? null : eligibility.lastUserName }
 }
 
 const LOOKUP_ERROR_MESSAGES = {

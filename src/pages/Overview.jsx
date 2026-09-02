@@ -5,12 +5,15 @@ import { useAuth } from '../context/AuthContext'
 import { listMyInContactCompanies } from '../lib/companies'
 
 // Every company here is, by construction, one the viewer is in contact with
-// — either an uncommitted in_contact_by marker or a committed cooldown, per
-// listMyInContactCompanies. No need to recompute the badge kind per row.
+// — either an uncommitted in_contact_by marker (still reversible — 'red')
+// or a committed cooldown (nothing left to undo — 'cooldown'/amber, same as
+// Companies.jsx's eligibilityBadge treats a self-committed cooldown).
 function withInContactBadge(companies) {
   return companies.map((company) => ({
     ...company,
-    eligibility: { kind: 'in-contact', uncommitted: company.uncommitted },
+    eligibility: company.uncommitted
+      ? { kind: 'in-contact' }
+      : { kind: 'cooldown', daysLeft: company.daysLeft, contactedBy: null },
   }))
 }
 

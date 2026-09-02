@@ -28,11 +28,13 @@ function metaLine(company) {
     .join(' · ')
 }
 
-// See eligibilityBadge in pages/Companies.jsx for how these five shapes get
-// picked: available, in-contact (the viewer marked or committed contact),
-// contacting (a teammate marked it, not yet committed), or cooldown (a
-// teammate committed it — shown as two badges together since "who" and "how
-// long" are both worth knowing).
+// See eligibilityBadge in pages/Companies.jsx for how these four shapes get
+// picked: available, in-contact (the viewer's own reversible marker —
+// there's no "committed by me" variant, see the comment there), contacting
+// (a teammate marked it, not yet committed), or cooldown (a committed
+// interaction — contactedBy is only set when it was a teammate, not the
+// viewer, since "Contacted by you" alongside a cooldown you already know
+// about isn't telling you anything).
 function EligibilityBadges({ eligibility }) {
   if (!eligibility) return null
   if (eligibility.kind === 'available') {
@@ -47,7 +49,7 @@ function EligibilityBadges({ eligibility }) {
   return (
     <>
       <span className="badge badge-cooldown">Cooldown, {eligibility.daysLeft}d left</span>
-      <span className="badge badge-neutral">Contacted by {eligibility.contactedBy}</span>
+      {eligibility.contactedBy && <span className="badge badge-neutral">Contacted by {eligibility.contactedBy}</span>}
     </>
   )
 }
@@ -213,13 +215,14 @@ function CompanyList({
                   {company.tracked &&
                     onEndInContact &&
                     company.eligibility?.kind === 'in-contact' &&
-                    company.eligibility?.uncommitted &&
                     (confirmingKey === company.rowKey ? (
                       <span className="company-card-confirm">
-                        <span className="row-note">Start the 14-day cooldown?</span>
+                        <span className="row-note">
+                          Company policy: outreach starts a 14-day cooldown.
+                        </span>
                         <button
                           type="button"
-                          className="row-action"
+                          className="btn btn-small"
                           onClick={() => {
                             onEndInContact(company, { startCooldown: true })
                             setConfirmingKey(null)
@@ -237,11 +240,7 @@ function CompanyList({
                         >
                           No cooldown
                         </button>
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => setConfirmingKey(null)}
-                        >
+                        <button type="button" className="link-button" onClick={() => setConfirmingKey(null)}>
                           Cancel
                         </button>
                       </span>
@@ -250,12 +249,12 @@ function CompanyList({
                         Not in contact anymore
                       </button>
                     ))}
-                  {company.tracked && company.is_manual && onEdit && (
+                  {confirmingKey !== company.rowKey && company.tracked && company.is_manual && onEdit && (
                     <button type="button" className="row-action" onClick={() => onEdit(company)}>
                       Edit
                     </button>
                   )}
-                  {company.tracked && canRemove && onRemove && (
+                  {confirmingKey !== company.rowKey && company.tracked && canRemove && onRemove && (
                     <button
                       type="button"
                       className="row-action row-action-danger"

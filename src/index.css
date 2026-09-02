@@ -111,6 +111,14 @@ textarea:focus-visible {
   opacity: 0.6;
 }
 
+/* Same dark/primary treatment as .btn, sized to sit inline with .row-action
+   siblings — for the one option in a choice that's worth defaulting to. */
+.btn-small {
+  font-size: 0.8125rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
 .company-search {
   width: 100%;
   max-width: 420px;

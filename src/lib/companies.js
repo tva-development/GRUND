@@ -62,23 +62,41 @@ export async function listMyCompanies(query) {
 // Ordered newest-registered-first rather than alphabetically: plain A-Z put
 // digit/symbol-prefixed names ("-1 Group AB", "@ Odero AB") ahead of
 // anything recognizable, and newest-first is more useful to browse anyway.
+//
+// A name search goes through search_registry_cache_by_name() rather than a
+// plain .ilike().order().range() chain -- confirmed live and reproduced
+// directly against Postgres: combining an arbitrary ILIKE with ORDER BY on
+// an unrelated (indexed) column makes the planner gamble on scanning that
+// column's index and checking the ILIKE per row, hoping to hit enough
+// matches quickly. For a rare, unevenly-dated term ("saab") that gamble can
+// mean scanning most of the table before finding any match -- the search
+// box's actual timeout. The function forces the filter through the trigram
+// index first (see its migration for the full plan comparison); an exact
+// org-number match or the no-filter browse each already go straight
+// through their own index with nothing to fight it, so neither needs this.
 export async function listRegistryCompanies({ page = 0, query = '' } = {}) {
   const trimmed = query.trim()
   const from = page * REGISTRY_PAGE_SIZE
   const to = from + REGISTRY_PAGE_SIZE // one extra row, to detect a next page
 
-  let builder = supabase
-    .from('company_registry_cache')
-    .select('*')
-    .order('registered_at', { ascending: false, nullsFirst: false })
-    .range(from, to)
-  if (trimmed) {
-    builder = looksLikeOrgNumber(trimmed)
-      ? builder.eq('org_number', normalizeOrgNumber(trimmed))
-      : builder.ilike('name', `%${trimmed}%`)
+  let data, error
+
+  if (trimmed && !looksLikeOrgNumber(trimmed)) {
+    ;({ data, error } = await supabase.rpc('search_registry_cache_by_name', {
+      p_pattern: `%${trimmed}%`,
+      p_limit: REGISTRY_PAGE_SIZE + 1,
+      p_offset: from,
+    }))
+  } else {
+    let builder = supabase
+      .from('company_registry_cache')
+      .select('*')
+      .order('registered_at', { ascending: false, nullsFirst: false })
+      .range(from, to)
+    if (trimmed) builder = builder.eq('org_number', normalizeOrgNumber(trimmed))
+    ;({ data, error } = await builder)
   }
 
-  const { data, error } = await builder
   if (error) throw error
 
   const hasMore = data.length > REGISTRY_PAGE_SIZE
