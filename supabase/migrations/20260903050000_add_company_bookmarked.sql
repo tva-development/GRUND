@@ -1,0 +1,16 @@
+-- "My Companies" was conflating two different things: "this tenant is
+-- tracking this company" and "this is the row interaction/cooldown_override/
+-- note/task/company_tag hang off". Removing a company deleted that row
+-- outright, taking its contact/cooldown history with it (cascade added in
+-- 20260903040000 only fixed the FK violation, not this) -- but per policy,
+-- a cooldown must survive being removed from "My Companies": that view is
+-- an optional bookmark list, while Overview is the durable source of truth
+-- for who's in contact / on cooldown with a company, regardless of whether
+-- it's currently bookmarked.
+--
+-- `bookmarked` decouples the two. Removing a company now just clears this
+-- flag instead of deleting the row -- everything hanging off it (contact
+-- history, in_contact_by, tags) stays intact and keeps showing on Overview.
+-- Defaults true so every row that exists today (all of which are currently
+-- "in My Companies") keeps behaving exactly as before.
+alter table company add column bookmarked boolean not null default true;

@@ -285,11 +285,7 @@ function Companies() {
       return
     }
     try {
-      const removed = await removeCompany(company.id)
-      if (removed.length === 0) {
-        window.alert('Only admins can remove companies.')
-        return
-      }
+      await removeCompany(company.id)
       reload()
     } catch (err) {
       window.alert(`Could not remove company: ${err.message}`)

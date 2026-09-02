@@ -39,12 +39,14 @@ function asRegistryRow(row) {
   return { ...row, tracked: false, rowKey: `registry:${row.org_number}` }
 }
 
-// "My Companies" tab — only ever the tenant's own tracked list, optionally
-// filtered by name. Never touches the shared registry: that's what "All
-// Companies" is for.
+// "My Companies" tab — only ever the tenant's own *bookmarked* companies,
+// optionally filtered by name. Never touches the shared registry: that's
+// what "All Companies" is for. bookmarked = false doesn't mean gone — see
+// removeCompany — so this must filter for it explicitly, same as
+// listTrackedOrgNumbers below.
 export async function listMyCompanies(query) {
   const trimmed = query.trim()
-  const base = supabase.from('company').select('*').order('name')
+  const base = supabase.from('company').select('*').eq('bookmarked', true).order('name')
   const { data, error } = await (trimmed ? base.ilike('name', `%${trimmed}%`) : base)
   if (error) throw error
   return data.map(asTenantRow)
@@ -103,12 +105,17 @@ export async function listRegistryCompanies({ page = 0, query = '' } = {}) {
   return { rows: data.slice(0, REGISTRY_PAGE_SIZE).map(asRegistryRow), hasMore }
 }
 
-// The set of org numbers the tenant already tracks, for flagging registry
-// rows as `alreadyAdded` in the "All Companies" tab without joining against
-// 882 000+ rows server-side. RLS (company_read) already scopes this to the
-// caller's tenant, same as every other unfiltered `company` select here.
+// The set of org numbers the tenant already has *bookmarked*, for flagging
+// registry rows as `alreadyAdded` in the "All Companies" tab without joining
+// against 882 000+ rows server-side. Filtered to bookmarked = true so a
+// removed company shows as addable again rather than stuck "✓ Added" —
+// re-adding it re-bookmarks the same row, see addCompanyFromRegistry.
 export async function listTrackedOrgNumbers() {
-  const { data, error } = await supabase.from('company').select('org_number').not('org_number', 'is', null)
+  const { data, error } = await supabase
+    .from('company')
+    .select('org_number')
+    .eq('bookmarked', true)
+    .not('org_number', 'is', null)
   if (error) throw error
   return new Set(data.map((row) => row.org_number))
 }
@@ -297,27 +304,37 @@ export async function lookupCompanyOnBolagsverket(orgNumber) {
 }
 
 // Promotes a registry_cache row (tier 2 or 3 result) into this tenant's own
-// company list. Plain tenant-scoped insert — no secrets, no Edge Function.
-// is_manual is explicitly false: this row mirrors Bolagsverket data, so its
-// company-info fields are read-only in the UI (see CompanyTable/CompanyForm).
+// company list — no secrets, no Edge Function. is_manual is explicitly
+// false: this row mirrors Bolagsverket data, so its company-info fields are
+// read-only in the UI (see CompanyTable/CompanyForm).
+//
+// Upserts on (tenant_id, org_number) rather than a plain insert: if this
+// org number was tracked before and removed (bookmarked = false, row still
+// there — see removeCompany), re-adding re-bookmarks and re-syncs that same
+// row instead of colliding with the unique constraint or leaving a second,
+// stale copy behind.
 export async function addCompanyFromRegistry(tenantId, registryRow) {
   const { data, error } = await supabase
     .from('company')
-    .insert({
-      tenant_id: tenantId,
-      org_number: registryRow.org_number,
-      name: registryRow.name,
-      company_form: tenantCompanyForm(registryRow.company_form),
-      sni_code: registryRow.sni_code,
-      industry_label: registryRow.industry_label,
-      description: registryRow.business_description,
-      city: registryRow.city,
-      address: registryRow.address,
-      zip: registryRow.zip,
-      no_marketing: registryRow.no_marketing,
-      registered_at: registryRow.registered_at,
-      is_manual: false,
-    })
+    .upsert(
+      {
+        tenant_id: tenantId,
+        org_number: registryRow.org_number,
+        name: registryRow.name,
+        company_form: tenantCompanyForm(registryRow.company_form),
+        sni_code: registryRow.sni_code,
+        industry_label: registryRow.industry_label,
+        description: registryRow.business_description,
+        city: registryRow.city,
+        address: registryRow.address,
+        zip: registryRow.zip,
+        no_marketing: registryRow.no_marketing,
+        registered_at: registryRow.registered_at,
+        is_manual: false,
+        bookmarked: true,
+      },
+      { onConflict: 'tenant_id,org_number' },
+    )
     .select()
     .single()
 
@@ -345,10 +362,20 @@ function manualCompanyFields(fields) {
 // number, non-AB/KB/EF entities — or simply a company someone wants to add
 // by hand rather than through the org-number search flow. is_manual: true
 // is what makes this row editable later (see updateCompany).
+//
+// Upserts for the same reason as addCompanyFromRegistry: a hand-typed org
+// number matching a previously-removed row re-bookmarks it instead of
+// hitting the unique constraint. Rows with no org number never conflict —
+// NULL is never "equal" to NULL under a unique constraint — so this is a
+// plain insert in the common case (PRD use case 9 is mostly org-number-less
+// entities to begin with).
 export async function addManualCompany(tenantId, fields) {
   const { data, error } = await supabase
     .from('company')
-    .insert({ ...manualCompanyFields(fields), tenant_id: tenantId, is_manual: true })
+    .upsert(
+      { ...manualCompanyFields(fields), tenant_id: tenantId, is_manual: true, bookmarked: true },
+      { onConflict: 'tenant_id,org_number' },
+    )
     .select()
     .single()
 
@@ -374,13 +401,18 @@ export async function updateCompany(companyId, fields) {
   return asTenantRow(data)
 }
 
-// Removes a company from the tenant's own list. Only ever affects the
-// tenant's `company` row — the shared registry_cache is never touched, so
-// this can't remove Bolagsverket's underlying data for other tenants.
-// RLS restricts this to admins; a non-admin call returns an empty array
-// (not an error), which callers should treat as "not permitted."
+// "Removes" a company from the tenant's bookmark list — clears `bookmarked`
+// rather than deleting the row. "My Companies" is an optional bookmark view;
+// Overview is the durable record of who's in contact / on cooldown with a
+// company, and that has to survive a removal here, along with its tags,
+// notes and tasks. A real DELETE would cascade all of that away (see
+// 20260903040000) the moment the row disappeared — so this never deletes.
+//
+// Same caveat as updateCompany: company_update's RLS only checks
+// tenant_id, not role, so this is reachable by any tenant member at the API
+// level — the UI's admin-only gate is what actually protects it.
 export async function removeCompany(companyId) {
-  const { data, error } = await supabase.from('company').delete().eq('id', companyId).select()
+  const { data, error } = await supabase.from('company').update({ bookmarked: false }).eq('id', companyId).select()
 
   if (error) throw error
   return data
