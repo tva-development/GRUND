@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 
 import CompanyForm from '../components/CompanyForm'
+import CompanyList from '../components/CompanyList'
 import CompanySearchBar from '../components/CompanySearchBar'
-import CompanyTable from '../components/CompanyTable'
 import { useAuth } from '../context/AuthContext'
 import {
   addCompanyFromRegistry,
@@ -35,7 +35,6 @@ function Companies() {
   const [activeTab, setActiveTab] = useState('mine')
 
   const [showAddForm, setShowAddForm] = useState(false)
-  const [selectedRowKey, setSelectedRowKey] = useState(null)
   const [editingCompany, setEditingCompany] = useState(null)
   const [reloadToken, setReloadToken] = useState(0)
 
@@ -161,7 +160,6 @@ function Companies() {
     setActiveTab(tab)
     setShowAddForm(false)
     setEditingCompany(null)
-    setSelectedRowKey(null)
   }
 
   async function handleAdd(registryRow) {
@@ -205,27 +203,9 @@ function Companies() {
         window.alert('Only admins can remove companies.')
         return
       }
-      setSelectedRowKey(null)
       reload()
     } catch (err) {
       window.alert(`Could not remove company: ${err.message}`)
-    }
-  }
-
-  function handleRowClick(event, company) {
-    // A double-click fires two click events before the dblclick — ignore
-    // anything past the first so selection doesn't flicker on/off.
-    if (event.detail > 1) return
-    setSelectedRowKey((current) => (current === company.rowKey ? null : company.rowKey))
-  }
-
-  function handleRowDoubleClick(company) {
-    // Only the tenant's own manually-added rows are editable. A registry row
-    // isn't theirs yet, and a registry-sourced one mirrors Bolagsverket.
-    if (company.tracked && company.is_manual) {
-      setSelectedRowKey(company.rowKey)
-      setEditingCompany(company)
-      setShowAddForm(false)
     }
   }
 
@@ -268,12 +248,13 @@ function Companies() {
             <button
               type="button"
               className="btn"
+              title="For a company not in the shared registry — search All Companies first"
               onClick={() => {
                 setShowAddForm((current) => !current)
                 setEditingCompany(null)
               }}
             >
-              {showAddForm ? 'Cancel' : '+ Add company'}
+              {showAddForm ? 'Cancel' : "+ Add a company not in the registry"}
             </button>
           </div>
 
@@ -300,14 +281,11 @@ function Companies() {
           {myLoading ? (
             <p>Loading…</p>
           ) : (
-            <CompanyTable
+            <CompanyList
               companies={myCompanies}
               canRemove={isAdmin}
               onRemove={handleRemove}
               onAdd={handleAdd}
-              selectedRowKey={selectedRowKey}
-              onRowClick={handleRowClick}
-              onRowDoubleClick={handleRowDoubleClick}
               onEdit={handleEdit}
             />
           )}
@@ -326,14 +304,11 @@ function Companies() {
             <p>Loading…</p>
           ) : (
             <>
-              <CompanyTable
+              <CompanyList
                 companies={allCompaniesDisplayed}
                 canRemove={false}
                 onRemove={handleRemove}
                 onAdd={handleAdd}
-                selectedRowKey={selectedRowKey}
-                onRowClick={handleRowClick}
-                onRowDoubleClick={handleRowDoubleClick}
                 onEdit={handleEdit}
               />
 

@@ -58,12 +58,20 @@ export async function listMyCompanies(query) {
 // Rows the tenant already tracks are still returned (this claims to be
 // *all* companies) but flagged via `alreadyAdded` so the UI can show that
 // instead of an "Add" button — see markTracked below.
+//
+// Ordered newest-registered-first rather than alphabetically: plain A-Z put
+// digit/symbol-prefixed names ("-1 Group AB", "@ Odero AB") ahead of
+// anything recognizable, and newest-first is more useful to browse anyway.
 export async function listRegistryCompanies({ page = 0, query = '' } = {}) {
   const trimmed = query.trim()
   const from = page * REGISTRY_PAGE_SIZE
   const to = from + REGISTRY_PAGE_SIZE // one extra row, to detect a next page
 
-  let builder = supabase.from('company_registry_cache').select('*').order('name').range(from, to)
+  let builder = supabase
+    .from('company_registry_cache')
+    .select('*')
+    .order('registered_at', { ascending: false, nullsFirst: false })
+    .range(from, to)
   if (trimmed) {
     builder = looksLikeOrgNumber(trimmed)
       ? builder.eq('org_number', normalizeOrgNumber(trimmed))

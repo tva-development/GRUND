@@ -98,6 +98,7 @@ textarea:focus-visible {
   border-radius: 6px;
   padding: 10px 16px;
   cursor: pointer;
+  white-space: nowrap;
   transition: background-color 0.15s;
 }
 
@@ -152,6 +153,7 @@ textarea:focus-visible {
 
 .companies-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
 }
@@ -200,76 +202,6 @@ textarea:focus-visible {
   text-decoration: underline;
 }
 
-/* Columns are drag-resizable and the table keeps its natural width, so this
-   scrolls sideways rather than squeezing long values into unreadable slivers. */
-.company-table-scroll {
-  overflow-x: auto;
-}
-
-.company-table {
-  table-layout: fixed;
-  border-collapse: collapse;
-  font-size: 0.9375rem;
-}
-
-.company-table th,
-.company-table td {
-  text-align: left;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.company-table td.cell-truncate {
-  text-overflow: ellipsis;
-}
-
-.company-table th {
-  position: relative;
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--slate);
-  font-weight: 500;
-}
-
-.col-resize-handle {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 9px;
-  height: 100%;
-  cursor: col-resize;
-  user-select: none;
-}
-
-/* A persistent line marks every draggable boundary — hover-only affordance
-   means someone has to already know where to look before they find it. */
-.col-resize-handle::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  right: 3px;
-  width: 2px;
-  height: 2em;
-  transform: translateY(-50%);
-  background: var(--slate);
-  opacity: 0.4;
-}
-
-.col-resize-handle:hover::after {
-  background: var(--navy);
-  opacity: 1;
-}
-
-/* While dragging, the cursor shouldn't flicker as it passes over text. */
-body.is-col-resizing {
-  cursor: col-resize;
-  user-select: none;
-}
-
 .badge {
   display: inline-block;
   padding: 2px 8px;
@@ -301,39 +233,100 @@ body.is-col-resizing {
   margin: 0 0 10px;
 }
 
-.company-table tbody tr {
-  cursor: pointer;
-}
-
-.company-table tbody tr:hover {
-  background: var(--paper-raised);
-}
-
-.company-row-selected {
-  background: var(--paper-raised);
-}
-
 .company-search-error {
   color: #a4222c;
 }
 
-/* Registry rows sit in the same table as the tenant's own companies but
-   aren't theirs yet — they're search results, not tracked companies. The
-   muted name plus the left edge marks the boundary without needing a second
-   table or a column that says "no". */
-.company-row-untracked td {
+.company-list {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.company-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper-raised);
+  overflow: hidden;
+}
+
+.company-card-summary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.company-card-summary:hover {
+  background: var(--border);
+}
+
+.company-card-chevron {
+  flex: none;
+  width: 1em;
   color: var(--slate);
 }
 
-.company-row-untracked td:first-child {
-  box-shadow: inset 2px 0 0 var(--paper-raised);
+.company-card-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.company-row-actions {
+.company-card-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-card-meta {
+  font-size: 0.8125rem;
+  color: var(--slate);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-card-added {
+  flex: none;
+  font-size: 0.8125rem;
+  color: var(--slate);
+}
+
+.company-card-detail {
+  padding: 4px 14px 14px 40px;
+  border-top: 1px solid var(--border);
+}
+
+.company-card-detail-row {
+  margin: 8px 0 0;
+  font-size: 0.9375rem;
+}
+
+.company-card-description {
+  margin: 8px 0 0;
+  color: var(--slate);
+  font-size: 0.9375rem;
+}
+
+.company-card-actions {
   display: flex;
   gap: 8px;
   align-items: center;
-  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .row-note {
