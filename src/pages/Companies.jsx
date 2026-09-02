@@ -7,25 +7,38 @@ import { useAuth } from '../context/AuthContext'
 import {
   addCompanyFromRegistry,
   addManualCompany,
+  addTagToCompany,
+  clearInContactMarker,
+  confirmInContactCooldown,
+  listCompanyTags,
   listEligibility,
   listMyCompanies,
   listRegistryCompanies,
+  listTags,
   listTrackedOrgNumbers,
   looksLikeOrgNumber,
   lookupCompanyOnBolagsverket,
-  markInContact,
   markTracked,
   removeCompany,
+  removeTagFromCompany,
+  resolveUserNames,
+  setInContactMarker,
   updateCompany,
 } from '../lib/companies'
 
-// contact_eligibility gives available/days_left/last_user_id; this decides
-// which of the four badges that becomes for the person looking at it. Cards
-// only see the result of this, never the raw eligibility row.
-function eligibilityBadge(eligibility, currentUserId) {
+// company.in_contact_by (an uncommitted "I've reached out" marker, freely
+// reversible) always wins over contact_eligibility (the committed, 14-day
+// cooldown state from an actual log_interaction() call) — it's the more
+// current fact. Falls through to eligibility only once no one's marked it.
+function eligibilityBadge(company, eligibility, currentUserId, inContactNames) {
+  if (company.in_contact_by) {
+    return company.in_contact_by === currentUserId
+      ? { kind: 'in-contact', uncommitted: true }
+      : { kind: 'contacting', contactedBy: inContactNames[company.in_contact_by] ?? 'a teammate' }
+  }
   if (!eligibility) return null
   if (eligibility.available) return { kind: 'available' }
-  if (eligibility.last_user_id === currentUserId) return { kind: 'in-contact' }
+  if (eligibility.last_user_id === currentUserId) return { kind: 'in-contact', uncommitted: false }
   return { kind: 'cooldown', daysLeft: eligibility.days_left, contactedBy: eligibility.lastUserName }
 }
 
@@ -84,6 +97,47 @@ function Companies() {
   // ---------------------------------------------------------------------
   const [myQuery, setMyQuery] = useState('')
   const [myCompanies, setMyCompanies] = useState([])
+  // Names for teammates' in_contact_by markers ("Being contacted by ___").
+  // Kept separate from listEligibility's own name resolution since
+  // in_contact_by lives on `company`, not contact_eligibility.
+  const [inContactNames, setInContactNames] = useState({})
+
+  useEffect(() => {
+    let active = true
+    const ids = myCompanies.map((company) => company.in_contact_by)
+    resolveUserNames(ids)
+      .then((names) => active && setInContactNames(names))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [myCompanies])
+
+  // The tenant's full tag vocabulary (for reuse/autocomplete) and which tags
+  // sit on which of the currently-loaded companies.
+  const [allTags, setAllTags] = useState([])
+  const [companyTagIds, setCompanyTagIds] = useState({})
+
+  useEffect(() => {
+    let active = true
+    listTags()
+      .then((tags) => active && setAllTags(tags))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [reloadToken])
+
+  useEffect(() => {
+    let active = true
+    listCompanyTags(myCompanies.map((company) => company.id))
+      .then((byCompany) => active && setCompanyTagIds(byCompany))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [myCompanies])
+
   const [myLoading, setMyLoading] = useState(true)
   const [myError, setMyError] = useState(null)
 
@@ -241,9 +295,22 @@ function Companies() {
     setShowAddForm(false)
   }
 
-  async function handleMarkInContact(company) {
+  async function handleSetInContact(company) {
     try {
-      await markInContact(company.id)
+      await setInContactMarker(company.id, appUser.id)
+      reload()
+    } catch (err) {
+      window.alert(`Could not mark as in contact: ${err.message}`)
+    }
+  }
+
+  async function handleEndInContact(company, { startCooldown }) {
+    try {
+      if (startCooldown) {
+        await confirmInContactCooldown(company.id)
+      } else {
+        await clearInContactMarker(company.id)
+      }
       reload()
     } catch (err) {
       if (err.message === 'COOLDOWN_ACTIVE') {
@@ -254,20 +321,41 @@ function Companies() {
           // Fall through to the generic message below.
         }
         window.alert(
-          daysLeft != null
-            ? `${company.name} is still in cooldown — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left.`
-            : `${company.name} is still in cooldown.`,
+          (daysLeft != null
+            ? `Could not start the cooldown — someone else already has ${daysLeft} day${daysLeft === 1 ? '' : 's'} left on ${company.name}.`
+            : `Could not start the cooldown for ${company.name}.`) +
+            ' The "in contact" mark is still there — you can remove it without starting a cooldown instead.',
         )
         return
       }
-      window.alert(`Could not log contact: ${err.message}`)
+      window.alert(`Could not update contact status: ${err.message}`)
     }
   }
 
+  async function handleAddTag(company, name) {
+    try {
+      await addTagToCompany(appUser.tenant_id, company.id, name)
+      reload()
+    } catch (err) {
+      window.alert(`Could not add tag: ${err.message}`)
+    }
+  }
+
+  async function handleRemoveTag(company, tagId) {
+    try {
+      await removeTagFromCompany(company.id, tagId)
+      reload()
+    } catch (err) {
+      window.alert(`Could not remove tag: ${err.message}`)
+    }
+  }
+
+  const tagsById = Object.fromEntries(allTags.map((tag) => [tag.id, tag]))
   const allCompaniesDisplayed = markTracked(allRows, trackedOrgNumbers)
   const myCompaniesDisplayed = myCompanies.map((company) => ({
     ...company,
-    eligibility: eligibilityBadge(eligibilityByCompany[company.id], appUser?.id),
+    eligibility: eligibilityBadge(company, eligibilityByCompany[company.id], appUser?.id, inContactNames),
+    tags: (companyTagIds[company.id] ?? []).map((tagId) => tagsById[tagId]).filter(Boolean),
   }))
 
   return (
@@ -341,7 +429,11 @@ function Companies() {
               onRemove={handleRemove}
               onAdd={handleAdd}
               onEdit={handleEdit}
-              onMarkInContact={handleMarkInContact}
+              onSetInContact={handleSetInContact}
+              onEndInContact={handleEndInContact}
+              allTags={allTags}
+              onAddTag={handleAddTag}
+              onRemoveTag={handleRemoveTag}
             />
           )}
         </>

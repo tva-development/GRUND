@@ -99,24 +99,27 @@ export function markTracked(rows, trackedOrgNumbers) {
   return rows.map((row) => ({ ...row, alreadyAdded: trackedOrgNumbers.has(row.org_number) }))
 }
 
+// last_user_id / in_contact_by have no FK PostgREST can embed through (one's
+// on a view, both point at app_user which callers query separately anyway),
+// so name resolution is always a deliberate second query, not automatic.
+export async function resolveUserNames(userIds) {
+  const ids = [...new Set(userIds.filter(Boolean))]
+  if (ids.length === 0) return {}
+  const { data, error } = await supabase.from('app_user').select('id, name').in('id', ids)
+  if (error) throw error
+  return Object.fromEntries(data.map((user) => [user.id, user.name]))
+}
+
 // contact_eligibility only covers tracked rows (it's a view over `company`),
 // so registry-only rows never get an eligibility badge. Keyed by company_id
-// for O(1) lookup when rendering. last_user_id has no FK PostgREST can embed
-// through a view, so the name lookup is a second query, merged here.
+// for O(1) lookup when rendering.
 export async function listEligibility() {
   const { data, error } = await supabase
     .from('contact_eligibility')
     .select('company_id, available, days_left, last_user_id')
   if (error) throw error
 
-  const userIds = [...new Set(data.map((row) => row.last_user_id).filter(Boolean))]
-  const names = {}
-  if (userIds.length > 0) {
-    const { data: users, error: userError } = await supabase.from('app_user').select('id, name').in('id', userIds)
-    if (userError) throw userError
-    for (const user of users) names[user.id] = user.name
-  }
-
+  const names = await resolveUserNames(data.map((row) => row.last_user_id))
   return Object.fromEntries(
     data.map((row) => [
       row.company_id,
@@ -125,44 +128,130 @@ export async function listEligibility() {
   )
 }
 
-// The "In contact" button's one-click log. `type: 'other'` since the button
-// doesn't ask which channel — log_interaction() is the only write path into
-// `interaction` (no direct insert policy), and raises COOLDOWN_ACTIVE if the
-// company's still within someone else's 14-day window; callers surface that
-// rather than silently overriding it.
-export async function markInContact(companyId) {
+// "In contact" is a two-step, reversible action, not a direct log — clicking
+// it immediately used to call log_interaction(), which starts the 14-day
+// cooldown right away with no way back (interaction is append-only, no
+// delete/update path). in_contact_by is a plain company column instead:
+// freely settable/clearable on company's normal update grant, with no
+// cooldown implication until it's explicitly confirmed.
+
+// Step 1: mark. Doesn't touch `interaction` at all.
+export async function setInContactMarker(companyId, userId) {
+  const { error } = await supabase.from('company').update({ in_contact_by: userId }).eq('id', companyId)
+  if (error) throw error
+}
+
+// Step 2a: un-mark without starting a cooldown -- it was set by mistake, or
+// the outreach never actually happened.
+export async function clearInContactMarker(companyId) {
+  const { error } = await supabase.from('company').update({ in_contact_by: null }).eq('id', companyId)
+  if (error) throw error
+}
+
+// Step 2b: un-mark AND commit the cooldown via log_interaction() -- the only
+// write path into `interaction`. On failure (COOLDOWN_ACTIVE, e.g. someone
+// else logged a fresher contact in the meantime) the marker is left alone
+// so the caller's "I was in contact" state isn't silently lost.
+export async function confirmInContactCooldown(companyId) {
   const { error } = await supabase.rpc('log_interaction', {
     p_company_id: companyId,
     p_type: 'other',
     p_note: null,
   })
   if (error) throw error
+  await clearInContactMarker(companyId)
 }
 
-// Companies the current viewer is personally in an active cooldown with —
-// contact_eligibility rows where they made the last contact and 14 days
-// haven't passed. Backs the Overview page's "who am I in contact with" list.
+// Companies the current viewer is in contact with, marker or committed
+// cooldown alike — union of in_contact_by = them (not yet confirmed) and
+// contact_eligibility rows they made the last (committed) contact on.
+// Backs the Overview page's "who am I in contact with" list.
 export async function listMyInContactCompanies(currentUserId) {
-  const { data: eligibilityRows, error } = await supabase
-    .from('contact_eligibility')
-    .select('company_id, days_left')
-    .eq('available', false)
-    .eq('last_user_id', currentUserId)
+  const [markedResult, eligibilityResult] = await Promise.all([
+    supabase.from('company').select('*').eq('in_contact_by', currentUserId),
+    supabase.from('contact_eligibility').select('company_id, days_left').eq('available', false).eq('last_user_id', currentUserId),
+  ])
+  if (markedResult.error) throw markedResult.error
+  if (eligibilityResult.error) throw eligibilityResult.error
+
+  const markedIds = new Set(markedResult.data.map((company) => company.id))
+  const daysLeftByCompany = Object.fromEntries(eligibilityResult.data.map((row) => [row.company_id, row.days_left]))
+  const committedIds = eligibilityResult.data.map((row) => row.company_id).filter((id) => !markedIds.has(id))
+
+  let committedCompanies = []
+  if (committedIds.length > 0) {
+    const { data, error } = await supabase.from('company').select('*').in('id', committedIds)
+    if (error) throw error
+    committedCompanies = data
+  }
+
+  const rows = [
+    ...markedResult.data.map((company) => ({ ...asTenantRow(company), uncommitted: true, daysLeft: null })),
+    ...committedCompanies.map((company) => ({
+      ...asTenantRow(company),
+      uncommitted: false,
+      daysLeft: daysLeftByCompany[company.id],
+    })),
+  ]
+  return rows.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'sv'))
+}
+
+// Free-form, tenant-defined labels — separate from the no_marketing/
+// eligibility badges, which are computed, not user-assigned. tag/company_tag
+// only ever apply to tracked rows: company_tag references company(id), not
+// company_registry_cache.
+export async function listTags() {
+  const { data, error } = await supabase.from('tag').select('*').order('name')
   if (error) throw error
-  if (eligibilityRows.length === 0) return []
+  return data
+}
 
-  const daysLeftByCompany = Object.fromEntries(eligibilityRows.map((row) => [row.company_id, row.days_left]))
-  const { data, error: companyError } = await supabase
-    .from('company')
-    .select('*')
-    .in(
-      'id',
-      eligibilityRows.map((row) => row.company_id),
-    )
-    .order('name')
-  if (companyError) throw companyError
+export async function listCompanyTags(companyIds) {
+  if (companyIds.length === 0) return {}
+  const { data, error } = await supabase.from('company_tag').select('company_id, tag_id').in('company_id', companyIds)
+  if (error) throw error
+  const byCompany = {}
+  for (const row of data) {
+    ;(byCompany[row.company_id] ??= []).push(row.tag_id)
+  }
+  return byCompany
+}
 
-  return data.map((company) => ({ ...asTenantRow(company), daysLeft: daysLeftByCompany[company.id] }))
+// Reuses an existing tag with this exact name (tag_tenant_id_name_key is
+// unique) rather than creating a near-duplicate. 23505 on the final attach
+// means someone already tagged this company with it between the lookup and
+// here — fine, that's the end state we wanted anyway.
+export async function addTagToCompany(tenantId, companyId, name) {
+  const trimmed = name.trim()
+  if (!trimmed) return
+
+  let tag
+  const { data: existing, error: findError } = await supabase
+    .from('tag')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('name', trimmed)
+    .maybeSingle()
+  if (findError) throw findError
+  tag = existing
+
+  if (!tag) {
+    const { data: created, error: createError } = await supabase
+      .from('tag')
+      .insert({ tenant_id: tenantId, name: trimmed })
+      .select('id')
+      .single()
+    if (createError) throw createError
+    tag = created
+  }
+
+  const { error: attachError } = await supabase.from('company_tag').insert({ company_id: companyId, tag_id: tag.id })
+  if (attachError && attachError.code !== '23505') throw attachError
+}
+
+export async function removeTagFromCompany(companyId, tagId) {
+  const { error } = await supabase.from('company_tag').delete().eq('company_id', companyId).eq('tag_id', tagId)
+  if (error) throw error
 }
 
 // Tier 2 — the shared, read-only registry cache. Anyone's prior lookup.

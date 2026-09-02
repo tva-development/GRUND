@@ -28,10 +28,11 @@ function metaLine(company) {
     .join(' · ')
 }
 
-// contact_eligibility only ever produces one of three shapes (see
-// eligibilityBadge in pages/Companies.jsx): available, in-contact (the
-// viewer made the last contact), or cooldown (a teammate did — shown as two
-// badges together since "who" and "how long" are both worth knowing).
+// See eligibilityBadge in pages/Companies.jsx for how these five shapes get
+// picked: available, in-contact (the viewer marked or committed contact),
+// contacting (a teammate marked it, not yet committed), or cooldown (a
+// teammate committed it — shown as two badges together since "who" and "how
+// long" are both worth knowing).
 function EligibilityBadges({ eligibility }) {
   if (!eligibility) return null
   if (eligibility.kind === 'available') {
@@ -39,6 +40,9 @@ function EligibilityBadges({ eligibility }) {
   }
   if (eligibility.kind === 'in-contact') {
     return <span className="badge badge-in-contact">In contact</span>
+  }
+  if (eligibility.kind === 'contacting') {
+    return <span className="badge badge-neutral">Being contacted by {eligibility.contactedBy}</span>
   }
   return (
     <>
@@ -48,19 +52,70 @@ function EligibilityBadges({ eligibility }) {
   )
 }
 
+// Its own component (not inline JSX) so each card's draft text is local
+// state that doesn't leak into the parent list's re-renders.
+function TagInput({ company, onAdd }) {
+  const [value, setValue] = useState('')
+
+  function handleSubmit(event) {
+    event.preventDefault()
+    if (!value.trim()) return
+    onAdd(company, value)
+    setValue('')
+  }
+
+  return (
+    <form className="company-card-tag-form" onSubmit={handleSubmit}>
+      <input
+        type="text"
+        className="company-card-tag-input"
+        placeholder="Add tag…"
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        list="company-tag-options"
+      />
+      <button type="submit" className="link-button">
+        Add
+      </button>
+    </form>
+  )
+}
+
 // Every handler is optional so the same list can be reused read-only (the
 // Overview page's "who am I in contact with" tracker passes none of them,
 // and the corresponding buttons just don't render).
-function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit, onMarkInContact }) {
+function CompanyList({
+  companies,
+  canRemove,
+  onRemove,
+  onAdd,
+  onEdit,
+  onSetInContact,
+  onEndInContact,
+  allTags,
+  onAddTag,
+  onRemoveTag,
+}) {
   const [expandedKey, setExpandedKey] = useState(null)
+  // Which card is mid-way through "Not in contact anymore" — showing the
+  // start-cooldown-or-not choice rather than having already committed to one.
+  const [confirmingKey, setConfirmingKey] = useState(null)
 
   if (companies.length === 0) {
     return <p>No companies match your search yet.</p>
   }
 
   return (
-    <ul className="company-list">
-      {companies.map((company) => {
+    <>
+      {allTags && allTags.length > 0 && (
+        <datalist id="company-tag-options">
+          {allTags.map((tag) => (
+            <option key={tag.id} value={tag.name} />
+          ))}
+        </datalist>
+      )}
+      <ul className="company-list">
+        {companies.map((company) => {
         const expanded = company.rowKey === expandedKey
         return (
           <li key={company.rowKey} className="company-card">
@@ -81,6 +136,11 @@ function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit, onMarkInCo
                     No marketing
                   </span>
                 )}
+                {(company.tags ?? []).map((tag) => (
+                  <span key={tag.id} className="badge badge-neutral">
+                    {tag.name}
+                  </span>
+                ))}
                 {company.tracked && <EligibilityBadges eligibility={company.eligibility} />}
                 {!company.tracked && company.alreadyAdded && (
                   <span className="company-card-added" title="Already in your companies">
@@ -112,6 +172,27 @@ function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit, onMarkInCo
                   {description(company) || 'No business description available.'}
                 </p>
 
+                {company.tracked && (onAddTag || (company.tags ?? []).length > 0) && (
+                  <div className="company-card-tags">
+                    {(company.tags ?? []).map((tag) => (
+                      <span key={tag.id} className="badge badge-neutral">
+                        {tag.name}
+                        {onRemoveTag && (
+                          <button
+                            type="button"
+                            className="company-card-tag-remove"
+                            onClick={() => onRemoveTag(company, tag.id)}
+                            aria-label={`Remove tag ${tag.name}`}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                    {onAddTag && <TagInput company={company} onAdd={onAddTag} />}
+                  </div>
+                )}
+
                 <div className="company-card-actions">
                   {!company.tracked && !company.alreadyAdded && onAdd && (
                     <button type="button" className="row-action" onClick={() => onAdd(company)}>
@@ -121,20 +202,58 @@ function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit, onMarkInCo
                   {!company.tracked && company.alreadyAdded && (
                     <span className="row-note">Already in your companies</span>
                   )}
-                  {company.tracked && onMarkInContact && company.eligibility?.kind !== 'in-contact' && (
-                    <button type="button" className="row-action" onClick={() => onMarkInContact(company)}>
-                      In contact
-                    </button>
-                  )}
+                  {company.tracked &&
+                    onSetInContact &&
+                    company.eligibility?.kind !== 'in-contact' &&
+                    company.eligibility?.kind !== 'contacting' && (
+                      <button type="button" className="row-action" onClick={() => onSetInContact(company)}>
+                        In contact
+                      </button>
+                    )}
+                  {company.tracked &&
+                    onEndInContact &&
+                    company.eligibility?.kind === 'in-contact' &&
+                    company.eligibility?.uncommitted &&
+                    (confirmingKey === company.rowKey ? (
+                      <span className="company-card-confirm">
+                        <span className="row-note">Start the 14-day cooldown?</span>
+                        <button
+                          type="button"
+                          className="row-action"
+                          onClick={() => {
+                            onEndInContact(company, { startCooldown: true })
+                            setConfirmingKey(null)
+                          }}
+                        >
+                          Start cooldown
+                        </button>
+                        <button
+                          type="button"
+                          className="row-action"
+                          onClick={() => {
+                            onEndInContact(company, { startCooldown: false })
+                            setConfirmingKey(null)
+                          }}
+                        >
+                          No cooldown
+                        </button>
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => setConfirmingKey(null)}
+                        >
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button type="button" className="row-action" onClick={() => setConfirmingKey(company.rowKey)}>
+                        Not in contact anymore
+                      </button>
+                    ))}
                   {company.tracked && company.is_manual && onEdit && (
                     <button type="button" className="row-action" onClick={() => onEdit(company)}>
                       Edit
                     </button>
-                  )}
-                  {company.tracked && !company.is_manual && (
-                    <span className="row-note" title="Registry data from Bolagsverket — not editable">
-                      Registry data
-                    </span>
                   )}
                   {company.tracked && canRemove && onRemove && (
                     <button
@@ -150,8 +269,9 @@ function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit, onMarkInCo
             )}
           </li>
         )
-      })}
-    </ul>
+        })}
+      </ul>
+    </>
   )
 }
 

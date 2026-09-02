@@ -350,7 +350,49 @@ textarea:focus-visible {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
   margin-top: 12px;
+}
+
+.company-card-confirm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.company-card-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.company-card-tag-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.company-card-tag-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.company-card-tag-input {
+  width: 110px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  font-size: 0.75rem;
 }
 
 .row-note {

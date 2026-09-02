@@ -4,11 +4,14 @@ import CompanyList from '../components/CompanyList'
 import { useAuth } from '../context/AuthContext'
 import { listMyInContactCompanies } from '../lib/companies'
 
-// Every company here is, by construction, one the viewer personally
-// contacted within the last 14 days — contact_eligibility already filtered
-// to exactly that. No need to recompute the badge kind per row.
+// Every company here is, by construction, one the viewer is in contact with
+// — either an uncommitted in_contact_by marker or a committed cooldown, per
+// listMyInContactCompanies. No need to recompute the badge kind per row.
 function withInContactBadge(companies) {
-  return companies.map((company) => ({ ...company, eligibility: { kind: 'in-contact' } }))
+  return companies.map((company) => ({
+    ...company,
+    eligibility: { kind: 'in-contact', uncommitted: company.uncommitted },
+  }))
 }
 
 function Overview() {
@@ -53,7 +56,7 @@ function Overview() {
       {loading ? (
         <p>Loading…</p>
       ) : companies.length === 0 ? (
-        <p>You're not in an active cooldown with any company right now.</p>
+        <p>You're not marked as in contact with, or in an active cooldown with, any company right now.</p>
       ) : (
         <CompanyList companies={withInContactBadge(companies)} canRemove={false} />
       )}
