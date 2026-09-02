@@ -5,7 +5,7 @@ import RequireAuth from './components/RequireAuth'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Companies from './pages/Companies'
 import Login from './pages/Login'
-import Tasks from './pages/Tasks'
+import Overview from './pages/Overview'
 
 function LoginRoute() {
   const { loading, session } = useAuth()
@@ -29,7 +29,7 @@ function AppRoutes() {
         <Route element={<Layout />}>
           <Route path="/" element={<Navigate to="/companies" replace />} />
           <Route path="/companies" element={<Companies />} />
-          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/overview" element={<Overview />} />
         </Route>
       </Route>
     </Routes>

@@ -13,6 +13,7 @@ import {
   listTrackedOrgNumbers,
   looksLikeOrgNumber,
   lookupCompanyOnBolagsverket,
+  markInContact,
   markTracked,
   removeCompany,
   updateCompany,
@@ -240,6 +241,29 @@ function Companies() {
     setShowAddForm(false)
   }
 
+  async function handleMarkInContact(company) {
+    try {
+      await markInContact(company.id)
+      reload()
+    } catch (err) {
+      if (err.message === 'COOLDOWN_ACTIVE') {
+        let daysLeft
+        try {
+          daysLeft = JSON.parse(err.details).days_left
+        } catch {
+          // Fall through to the generic message below.
+        }
+        window.alert(
+          daysLeft != null
+            ? `${company.name} is still in cooldown — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left.`
+            : `${company.name} is still in cooldown.`,
+        )
+        return
+      }
+      window.alert(`Could not log contact: ${err.message}`)
+    }
+  }
+
   const allCompaniesDisplayed = markTracked(allRows, trackedOrgNumbers)
   const myCompaniesDisplayed = myCompanies.map((company) => ({
     ...company,
@@ -317,6 +341,7 @@ function Companies() {
               onRemove={handleRemove}
               onAdd={handleAdd}
               onEdit={handleEdit}
+              onMarkInContact={handleMarkInContact}
             />
           )}
         </>

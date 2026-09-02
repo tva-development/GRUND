@@ -125,6 +125,46 @@ export async function listEligibility() {
   )
 }
 
+// The "In contact" button's one-click log. `type: 'other'` since the button
+// doesn't ask which channel — log_interaction() is the only write path into
+// `interaction` (no direct insert policy), and raises COOLDOWN_ACTIVE if the
+// company's still within someone else's 14-day window; callers surface that
+// rather than silently overriding it.
+export async function markInContact(companyId) {
+  const { error } = await supabase.rpc('log_interaction', {
+    p_company_id: companyId,
+    p_type: 'other',
+    p_note: null,
+  })
+  if (error) throw error
+}
+
+// Companies the current viewer is personally in an active cooldown with —
+// contact_eligibility rows where they made the last contact and 14 days
+// haven't passed. Backs the Overview page's "who am I in contact with" list.
+export async function listMyInContactCompanies(currentUserId) {
+  const { data: eligibilityRows, error } = await supabase
+    .from('contact_eligibility')
+    .select('company_id, days_left')
+    .eq('available', false)
+    .eq('last_user_id', currentUserId)
+  if (error) throw error
+  if (eligibilityRows.length === 0) return []
+
+  const daysLeftByCompany = Object.fromEntries(eligibilityRows.map((row) => [row.company_id, row.days_left]))
+  const { data, error: companyError } = await supabase
+    .from('company')
+    .select('*')
+    .in(
+      'id',
+      eligibilityRows.map((row) => row.company_id),
+    )
+    .order('name')
+  if (companyError) throw companyError
+
+  return data.map((company) => ({ ...asTenantRow(company), daysLeft: daysLeftByCompany[company.id] }))
+}
+
 // Tier 2 — the shared, read-only registry cache. Anyone's prior lookup.
 export async function findInRegistryCache(orgNumber) {
   const { data, error } = await supabase

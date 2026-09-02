@@ -48,7 +48,10 @@ function EligibilityBadges({ eligibility }) {
   )
 }
 
-function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit }) {
+// Every handler is optional so the same list can be reused read-only (the
+// Overview page's "who am I in contact with" tracker passes none of them,
+// and the corresponding buttons just don't render).
+function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit, onMarkInContact }) {
   const [expandedKey, setExpandedKey] = useState(null)
 
   if (companies.length === 0) {
@@ -100,12 +103,17 @@ function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit }) {
                     <strong>Industry:</strong> {company.industry_label}
                   </p>
                 )}
+                {company.daysLeft != null && (
+                  <p className="company-card-detail-row">
+                    <strong>Cooldown ends in:</strong> {company.daysLeft} day{company.daysLeft === 1 ? '' : 's'}
+                  </p>
+                )}
                 <p className="company-card-description">
                   {description(company) || 'No business description available.'}
                 </p>
 
                 <div className="company-card-actions">
-                  {!company.tracked && !company.alreadyAdded && (
+                  {!company.tracked && !company.alreadyAdded && onAdd && (
                     <button type="button" className="row-action" onClick={() => onAdd(company)}>
                       + Add to my companies
                     </button>
@@ -113,7 +121,12 @@ function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit }) {
                   {!company.tracked && company.alreadyAdded && (
                     <span className="row-note">Already in your companies</span>
                   )}
-                  {company.tracked && company.is_manual && (
+                  {company.tracked && onMarkInContact && company.eligibility?.kind !== 'in-contact' && (
+                    <button type="button" className="row-action" onClick={() => onMarkInContact(company)}>
+                      In contact
+                    </button>
+                  )}
+                  {company.tracked && company.is_manual && onEdit && (
                     <button type="button" className="row-action" onClick={() => onEdit(company)}>
                       Edit
                     </button>
@@ -123,7 +136,7 @@ function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit }) {
                       Registry data
                     </span>
                   )}
-                  {company.tracked && canRemove && (
+                  {company.tracked && canRemove && onRemove && (
                     <button
                       type="button"
                       className="row-action row-action-danger"

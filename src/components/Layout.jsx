@@ -27,8 +27,8 @@ function Layout() {
           <NavLink to="/companies" style={navLinkStyle}>
             Companies
           </NavLink>
-          <NavLink to="/tasks" style={navLinkStyle}>
-            Tasks
+          <NavLink to="/overview" style={navLinkStyle}>
+            Overview
           </NavLink>
           <button
             onClick={signOut}
