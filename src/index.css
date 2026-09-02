@@ -111,6 +111,14 @@ textarea:focus-visible {
   opacity: 0.6;
 }
 
+/* Same dark/primary treatment as .btn, sized to sit inline with .row-action
+   siblings — for the one option in a choice that's worth defaulting to. */
+.btn-small {
+  font-size: 0.8125rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
 .company-search {
   width: 100%;
   max-width: 420px;
@@ -221,6 +229,21 @@ textarea:focus-visible {
   color: var(--slate);
 }
 
+.badge-available {
+  background: #dcf3e4;
+  color: #1a7a3f;
+}
+
+.badge-cooldown {
+  background: #fbecd0;
+  color: #93590a;
+}
+
+.badge-in-contact {
+  background: #fbdede;
+  color: #a4222c;
+}
+
 .company-lookup-prompt {
   margin-top: 16px;
   padding: 14px 16px;
@@ -300,6 +323,15 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.company-card-badges {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 45%;
+}
+
 .company-card-added {
   flex: none;
   font-size: 0.8125rem;
@@ -326,7 +358,49 @@ textarea:focus-visible {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
   margin-top: 12px;
+}
+
+.company-card-confirm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.company-card-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.company-card-tag-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.company-card-tag-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.company-card-tag-input {
+  width: 110px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  font-size: 0.75rem;
 }
 
 .row-note {

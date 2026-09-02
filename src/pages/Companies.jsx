@@ -7,15 +7,46 @@ import { useAuth } from '../context/AuthContext'
 import {
   addCompanyFromRegistry,
   addManualCompany,
+  addTagToCompany,
+  clearInContactMarker,
+  confirmInContactCooldown,
+  listCompanyTags,
+  listEligibility,
   listMyCompanies,
   listRegistryCompanies,
+  listTags,
   listTrackedOrgNumbers,
   looksLikeOrgNumber,
   lookupCompanyOnBolagsverket,
   markTracked,
   removeCompany,
+  removeTagFromCompany,
+  resolveUserNames,
+  setInContactMarker,
   updateCompany,
 } from '../lib/companies'
+
+// company.in_contact_by (an uncommitted "I've reached out" marker, freely
+// reversible) always wins over contact_eligibility (the committed, 14-day
+// cooldown state from an actual log_interaction() call) — it's the more
+// current fact. Falls through to eligibility only once no one's marked it.
+//
+// 'in-contact' (red) means the marker specifically — it's the only state
+// that's still reversible, which is what the "Not in contact anymore"
+// button keys off. Once a cooldown actually commits, self or teammate alike
+// show as 'cooldown' (amber) — there's nothing left to undo at that point,
+// so it shouldn't keep reading as the same actionable red state.
+function eligibilityBadge(company, eligibility, currentUserId, inContactNames) {
+  if (company.in_contact_by) {
+    return company.in_contact_by === currentUserId
+      ? { kind: 'in-contact' }
+      : { kind: 'contacting', contactedBy: inContactNames[company.in_contact_by] ?? 'a teammate' }
+  }
+  if (!eligibility) return null
+  if (eligibility.available) return { kind: 'available' }
+  const isSelf = eligibility.last_user_id === currentUserId
+  return { kind: 'cooldown', daysLeft: eligibility.days_left, contactedBy: isSelf ? null : eligibility.lastUserName }
+}
 
 const LOOKUP_ERROR_MESSAGES = {
   INVALID_ORG_NUMBER: "That doesn't look like a valid Swedish org number.",
@@ -52,11 +83,67 @@ function Companies() {
     }
   }, [reloadToken])
 
+  // Cooldown/contact-history badge data, keyed by company_id. Only ever
+  // relevant to "My Companies" — contact_eligibility has no rows for
+  // companies nobody's tracking yet.
+  const [eligibilityByCompany, setEligibilityByCompany] = useState({})
+
+  useEffect(() => {
+    let active = true
+    listEligibility()
+      .then((byCompany) => active && setEligibilityByCompany(byCompany))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [reloadToken])
+
   // ---------------------------------------------------------------------
   // "My Companies" — the tenant's own tracked list.
   // ---------------------------------------------------------------------
   const [myQuery, setMyQuery] = useState('')
   const [myCompanies, setMyCompanies] = useState([])
+  // Names for teammates' in_contact_by markers ("Being contacted by ___").
+  // Kept separate from listEligibility's own name resolution since
+  // in_contact_by lives on `company`, not contact_eligibility.
+  const [inContactNames, setInContactNames] = useState({})
+
+  useEffect(() => {
+    let active = true
+    const ids = myCompanies.map((company) => company.in_contact_by)
+    resolveUserNames(ids)
+      .then((names) => active && setInContactNames(names))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [myCompanies])
+
+  // The tenant's full tag vocabulary (for reuse/autocomplete) and which tags
+  // sit on which of the currently-loaded companies.
+  const [allTags, setAllTags] = useState([])
+  const [companyTagIds, setCompanyTagIds] = useState({})
+
+  useEffect(() => {
+    let active = true
+    listTags()
+      .then((tags) => active && setAllTags(tags))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [reloadToken])
+
+  useEffect(() => {
+    let active = true
+    listCompanyTags(myCompanies.map((company) => company.id))
+      .then((byCompany) => active && setCompanyTagIds(byCompany))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [myCompanies])
+
   const [myLoading, setMyLoading] = useState(true)
   const [myError, setMyError] = useState(null)
 
@@ -198,11 +285,7 @@ function Companies() {
       return
     }
     try {
-      const removed = await removeCompany(company.id)
-      if (removed.length === 0) {
-        window.alert('Only admins can remove companies.')
-        return
-      }
+      await removeCompany(company.id)
       reload()
     } catch (err) {
       window.alert(`Could not remove company: ${err.message}`)
@@ -214,7 +297,68 @@ function Companies() {
     setShowAddForm(false)
   }
 
+  async function handleSetInContact(company) {
+    try {
+      await setInContactMarker(company.id, appUser.id)
+      reload()
+    } catch (err) {
+      window.alert(`Could not mark as in contact: ${err.message}`)
+    }
+  }
+
+  async function handleEndInContact(company, { startCooldown }) {
+    try {
+      if (startCooldown) {
+        await confirmInContactCooldown(company.id)
+      } else {
+        await clearInContactMarker(company.id)
+      }
+      reload()
+    } catch (err) {
+      if (err.message === 'COOLDOWN_ACTIVE') {
+        let daysLeft
+        try {
+          daysLeft = JSON.parse(err.details).days_left
+        } catch {
+          // Fall through to the generic message below.
+        }
+        window.alert(
+          (daysLeft != null
+            ? `Could not start the cooldown — someone else already has ${daysLeft} day${daysLeft === 1 ? '' : 's'} left on ${company.name}.`
+            : `Could not start the cooldown for ${company.name}.`) +
+            ' The "in contact" mark is still there — you can remove it without starting a cooldown instead.',
+        )
+        return
+      }
+      window.alert(`Could not update contact status: ${err.message}`)
+    }
+  }
+
+  async function handleAddTag(company, name) {
+    try {
+      await addTagToCompany(appUser.tenant_id, company.id, name)
+      reload()
+    } catch (err) {
+      window.alert(`Could not add tag: ${err.message}`)
+    }
+  }
+
+  async function handleRemoveTag(company, tagId) {
+    try {
+      await removeTagFromCompany(company.id, tagId)
+      reload()
+    } catch (err) {
+      window.alert(`Could not remove tag: ${err.message}`)
+    }
+  }
+
+  const tagsById = Object.fromEntries(allTags.map((tag) => [tag.id, tag]))
   const allCompaniesDisplayed = markTracked(allRows, trackedOrgNumbers)
+  const myCompaniesDisplayed = myCompanies.map((company) => ({
+    ...company,
+    eligibility: eligibilityBadge(company, eligibilityByCompany[company.id], appUser?.id, inContactNames),
+    tags: (companyTagIds[company.id] ?? []).map((tagId) => tagsById[tagId]).filter(Boolean),
+  }))
 
   return (
     <>
@@ -282,11 +426,16 @@ function Companies() {
             <p>Loading…</p>
           ) : (
             <CompanyList
-              companies={myCompanies}
+              companies={myCompaniesDisplayed}
               canRemove={isAdmin}
               onRemove={handleRemove}
               onAdd={handleAdd}
               onEdit={handleEdit}
+              onSetInContact={handleSetInContact}
+              onEndInContact={handleEndInContact}
+              allTags={allTags}
+              onAddTag={handleAddTag}
+              onRemoveTag={handleRemoveTag}
             />
           )}
         </>
