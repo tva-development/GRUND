@@ -71,8 +71,12 @@ Kolumnen `business_description` tillkom i
 avvisas importen.
 
 ```powershell
-npx supabase migration up
+npx supabase migration up --local
 ```
+
+`--local` är inte valfritt: projektet är länkat mot ett dött moln-projekt
+(diskutrymme slut, se planen), och utan flaggan försöker CLI:t nå det i
+stället för din lokala Docker-databas och kraschar med samma `57P03`-fel.
 
 `npx` behövs för att supabase-CLI:t varken är en devDependency i
 `package.json` eller installerat globalt. Vill man slippa det går det att
@@ -123,7 +127,7 @@ psql postgresql://postgres:postgres@127.0.0.1:54322/postgres
 Prompten byts till `postgres=#`. Nu är du i psql. Klistra in:
 
 ```sql
-create unlogged table staging_registry (org_number text, name text, company_form text, sni_code text, industry_label text, business_description text, address text, city text, zip text, is_active text, in_liquidation text, no_marketing text, deregistered_at text, deregistration_reason text, registered_at text, last_fetched_at text, raw text);
+create unlogged table staging_registry (org_number text, name text, company_form text, sni_code text, industry_label text, business_description text, address text, city text, zip text, no_marketing text, registered_at text, last_fetched_at text, raw text);
 ```
 
 Sedan inläsningen. **En rad** — `\copy` avslutas av radbrytningen, så den får
@@ -171,7 +175,7 @@ $CSV = "C:/Users/lukas/Downloads/script/company_registry_cache_import.csv"
 ```
 
 ```powershell
-psql $DB -v ON_ERROR_STOP=1 -c "create unlogged table staging_registry (org_number text, name text, company_form text, sni_code text, industry_label text, business_description text, address text, city text, zip text, is_active text, in_liquidation text, no_marketing text, deregistered_at text, deregistration_reason text, registered_at text, last_fetched_at text, raw text);" -c "\copy staging_registry from '$CSV' with (format csv, header, encoding 'UTF8')"
+psql $DB -v ON_ERROR_STOP=1 -c "create unlogged table staging_registry (org_number text, name text, company_form text, sni_code text, industry_label text, business_description text, address text, city text, zip text, no_marketing text, registered_at text, last_fetched_at text, raw text);" -c "\copy staging_registry from '$CSV' with (format csv, header, encoding 'UTF8')"
 ```
 
 ```powershell
@@ -229,8 +233,10 @@ matchar en SCB-rad, så de bortfiltrerade är i praktiken exakt de som saknar
 
 Vill du ha med allt, sätt `SKIP_DEREGISTERED` och `SKIP_NOT_ACTIVE` till
 `False` överst i skriptet. Åt andra hållet finns 4 366 rader under
-likvidation eller fusion (`in_liquidation = true`, en del sedan tidigt
-90-tal) — de filtreras inte bort idag, men går att sålla på i SQL efteråt.
+likvidation eller fusion, en del sedan tidigt 90-tal — de filtreras inte bort
+idag. `in_liquidation` är ingen egen kolumn (se
+[`20260901000000_retire_status_columns.sql`](../../supabase/migrations/20260901000000_retire_status_columns.sql)),
+men går att sålla på i efterhand via `raw->>'avvecklingsforfarande' is not null`.
 
 ## Om filerna — mätt, inte antaget
 

@@ -38,8 +38,7 @@ select
 -- ---------------------------------------------------------------------------
 insert into company_registry_cache (
   org_number, name, company_form, sni_code, industry_label,
-  business_description, address, city, zip, is_active, in_liquidation,
-  no_marketing, deregistered_at, deregistration_reason, registered_at,
+  business_description, address, city, zip, no_marketing, registered_at,
   last_fetched_at, raw
 )
 select distinct on (org_number)
@@ -58,15 +57,13 @@ select distinct on (org_number)
   -- Utan vakten avbryter en (1) sådan rad hela insert-satsen och alla
   -- 880 000 bra rader rullas tillbaka. Med den blir fältet NULL och resten
   -- av raden går in. Hittas de i efterhand med frågan längst ned.
-  case when is_active in ('true', 'false') then is_active::boolean end,
-  coalesce(case when in_liquidation in ('true', 'false') then in_liquidation::boolean end, false),
   case when no_marketing in ('true', 'false') then no_marketing::boolean end,
-  case when deregistered_at ~ '^\d{4}-\d{2}-\d{2}' then deregistered_at::timestamptz end,
-  nullif(deregistration_reason, ''),
   case when registered_at ~ '^\d{4}-\d{2}-\d{2}$' then registered_at::date end,
   case when last_fetched_at ~ '^\d{4}-\d{2}-\d{2}' then last_fetched_at::timestamptz end,
   -- raw kommer från json.dumps och är alltid giltig JSON, så den behöver
-  -- ingen vakt.
+  -- ingen vakt. is_active/in_liquidation/deregistered_at/deregistration_reason
+  -- har ingen egen kolumn längre (20260901000000_retire_status_columns.sql)
+  -- men ligger kvar här inne, oförlorade.
   nullif(raw, '')::jsonb
 from staging_registry
 where org_number is not null and org_number <> ''
@@ -80,11 +77,7 @@ on conflict (org_number) do update set
   address               = excluded.address,
   city                  = excluded.city,
   zip                   = excluded.zip,
-  is_active             = excluded.is_active,
-  in_liquidation        = excluded.in_liquidation,
   no_marketing          = excluded.no_marketing,
-  deregistered_at       = excluded.deregistered_at,
-  deregistration_reason = excluded.deregistration_reason,
   registered_at         = excluded.registered_at,
   last_fetched_at       = excluded.last_fetched_at,
   raw                   = excluded.raw
@@ -97,7 +90,6 @@ select
   count(*) filter (where sni_code is not null)               as med_sni,
   count(*) filter (where industry_label is not null)         as med_bransch,
   count(*) filter (where business_description is not null)   as med_beskrivning,
-  count(*) filter (where is_active)                          as verksamma,
   count(*) filter (where no_marketing)                       as reklamsparr
 from company_registry_cache;
 
@@ -111,8 +103,7 @@ limit 5;
 \echo '== Källrader med förskjutna fält (tomt = allt rent) =='
 select org_number, left(name, 38) as name, left(registered_at, 40) as registered_at
 from staging_registry
-where (registered_at <> ''   and registered_at   !~ '^\d{4}-\d{2}-\d{2}$')
-   or (deregistered_at <> '' and deregistered_at !~ '^\d{4}-\d{2}-\d{2}')
+where registered_at <> '' and registered_at !~ '^\d{4}-\d{2}-\d{2}$'
 limit 10;
 
 -- Staging behövs inte längre. Den är unlogged, så den försvinner ändå vid

@@ -60,14 +60,14 @@ function mapOrganisation(orgNumber: string, org: Record<string, any>) {
       (entry: any) => entry.organisationsnamntyp?.kod === 'FORETAGSNAMN',
     ) ?? org.organisationsnamn?.organisationsnamnLista?.[0]
 
-  const hasOngoingProceedings = Boolean(
-    org.pagaendeAvvecklingsEllerOmstruktureringsforfarande
-      ?.pagaendeAvvecklingsEllerOmstruktureringsforfarandeLista?.length,
-  )
-
   const janejToBoolean = (kod: string | undefined) =>
     kod === 'JA' ? true : kod === 'NEJ' ? false : null
 
+  // is_active/in_liquidation/deregistered_at/deregistration_reason used to be
+  // mapped here too, but company_registry_cache dropped those columns (see
+  // 20260901000000_retire_status_columns.sql) — nothing is lost, though:
+  // `raw: org` below already carries the untouched API response they came
+  // from (verksamOrganisation, pagaendeAvveckling..., avregistrerad...).
   return {
     org_number: orgNumber,
     name: namePreferringCompanyName?.namn ?? null,
@@ -77,11 +77,7 @@ function mapOrganisation(orgNumber: string, org: Record<string, any>) {
     city: org.postadressOrganisation?.postadress?.postort ?? null,
     address: org.postadressOrganisation?.postadress?.utdelningsadress ?? null,
     zip: org.postadressOrganisation?.postadress?.postnummer ?? null,
-    is_active: janejToBoolean(org.verksamOrganisation?.kod),
-    in_liquidation: hasOngoingProceedings,
     no_marketing: janejToBoolean(org.reklamsparr?.kod),
-    deregistered_at: org.avregistreradOrganisation?.avregistreringsdatum ?? null,
-    deregistration_reason: org.avregistreringsorsak?.klartext ?? null,
     registered_at: org.organisationsdatum?.registreringsdatum ?? null,
     raw: org,
     last_fetched_at: new Date().toISOString(),
