@@ -122,10 +122,51 @@ textarea:focus-visible {
   font-size: 0.9375rem;
 }
 
+.company-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.company-tab {
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  color: var(--slate);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 4px;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+
+.company-tab:hover {
+  color: var(--ink);
+}
+
+.company-tab-active {
+  color: var(--ink);
+  border-bottom-color: var(--navy);
+}
+
 .companies-toolbar {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.company-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.company-pagination-page {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--slate);
 }
 
 .companies-toolbar .company-search {
@@ -241,21 +282,6 @@ body.is-col-resizing {
    alone in its own cell should line up with its column header. */
 .badge-inline {
   margin-left: 8px;
-}
-
-.badge-good {
-  background: #dcf3e4;
-  color: #1a7a3f;
-}
-
-.badge-bad {
-  background: #fbdede;
-  color: #a4222c;
-}
-
-.badge-warn {
-  background: #fbecd0;
-  color: #93590a;
 }
 
 .badge-neutral {

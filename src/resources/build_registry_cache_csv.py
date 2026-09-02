@@ -3,10 +3,15 @@ Slår ihop Bolagsverkets bulkfil med SCB:s bulkfil till en CSV som läses in i
 company_registry_cache.
 
 Bolagsverket ger:  org_number, name, company_form, address, city, zip,
-                   registered_at, deregistered_at, deregistration_reason,
-                   in_liquidation, business_description
-SCB ger:           sni_code (Ng1), is_active (FtgStat), no_marketing
-                   (Reklamsparrtyp), samt en andra adress och SCB:s eget namn
+                   registered_at, business_description
+SCB ger:           sni_code (Ng1), no_marketing (Reklamsparrtyp), samt en
+                   andra adress och SCB:s eget namn
+
+company_registry_cache saknar kolumner för avregistrering/likvidation/
+verksamhetsstatus (se 20260901000000_retire_status_columns.sql) — is_active
+och deregistrerings-/likvidationsfälten används fortfarande som FILTER här
+(SKIP_NOT_ACTIVE, SKIP_DEREGISTERED) men skrivs inte ut som egna kolumner.
+Källvärdena hamnar i stället i `raw`, samma mönster som resten av skriptet.
 
 industry_label härleds ur sni_code via SNI 2025-listan, så kolumnen håller
 samma sorts officiella etikett som den live tier 3-lookupen skriver.
@@ -122,11 +127,7 @@ OUTPUT_COLUMNS = [
     "address",
     "city",
     "zip",
-    "is_active",
-    "in_liquidation",
     "no_marketing",
-    "deregistered_at",
-    "deregistration_reason",
     "registered_at",
     "last_fetched_at",
     "raw",
@@ -395,6 +396,7 @@ def load_scb(wanted):
                     "jur_form": row.get("JurForm") or None,  # SCB:s kodlista, INTE Bolagsverkets
                     "je_stat": row.get("JEStat") or None,
                     "reg_datum": row.get("RegDatKtid") or None,
+                    "ftg_stat_raw": row.get("FtgStat") or None,  # verksamhetsstatus, ingen egen kolumn längre
                     "ng_ovriga": [c for c in extra_ng if c] or None,
                     # Bolagsverkets postadress är ofta en box eller c/o.
                     # SCB:s gatuadress är den man faktiskt åker till.
@@ -526,10 +528,13 @@ def write_output(winners, extra_names, scb, sni_labels):
                 "namnskyddslopnummer": row.get("namnskyddslopnummer") or None,
                 "registreringsland": row.get("registreringsland") or None,
                 "co_adress": co_address,
-                # Kollapsas till in_liquidation, men strängen bär både typ
-                # och datum ('|LI-AVOMFO$2019-08-27' = likvidation,
-                # '|FUOL-AVOMFO$...' = fusion) och är värd att behålla.
+                # Ingen egen kolumn längre (se 20260901000000_retire_status_
+                # columns.sql) -- strängen bär både typ och datum
+                # ('|LI-AVOMFO$2019-08-27' = likvidation, '|FUOL-AVOMFO$...'
+                # = fusion), värd att behålla trots det.
                 "avvecklingsforfarande": avveckling,
+                "avregistreringsdatum_raw": row.get("avregistreringsdatum") or None,
+                "avregistreringsorsak_raw": row.get("avregistreringsorsak") or None,
                 "andra_namn": [n for n in extra_names.get(org_number, []) if n and n != name] or None,
             }
             if scb_extras:
@@ -547,11 +552,7 @@ def write_output(winners, extra_names, scb, sni_labels):
                 street,
                 city,
                 zip_code,
-                is_active,
-                to_pg_bool(avveckling),
                 no_marketing,
-                safe_date(row.get("avregistreringsdatum"), malformed),
-                code_only(row.get("avregistreringsorsak")),
                 safe_date(row.get("registreringsdatum"), malformed),
                 BULK_LAST_FETCHED_AT,
                 json.dumps(raw, ensure_ascii=False),

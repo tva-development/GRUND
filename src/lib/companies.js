@@ -4,16 +4,8 @@ import { supabase } from './supabaseClient'
 // personnummer/samordningsnummer (12 digits), hyphens allowed anywhere in the input.
 const ORG_NUMBER_PATTERN = /^\d[\d\s-]{8,}$/
 
-// How many registry rows a single search may return. "bygg" alone matches
-// 31 294 of the 882 000 cached companies, so this is a display cap as much as
-// a performance one — nobody scrolls past the first screen of a term that
-// broad, they refine it instead.
-export const REGISTRY_RESULT_LIMIT = 50
-
-// Below this, a name search matches so much of the register that the result is
-// noise rather than an answer. Org-number searches are exempt — those are
-// exact and always worth running.
-const MIN_REGISTRY_QUERY_LENGTH = 2
+// Page size for the "All Companies" browse tab.
+export const REGISTRY_PAGE_SIZE = 50
 
 // `company.company_form` has a check constraint listing eight values, while the
 // registry carries 25 distinct Bolagsverket codes (FL, KHF, OFB, BAB …) across
@@ -47,67 +39,56 @@ function asRegistryRow(row) {
   return { ...row, tracked: false, rowKey: `registry:${row.org_number}` }
 }
 
-function byName(a, b) {
-  return (a.name ?? '').localeCompare(b.name ?? '', 'sv')
+// "My Companies" tab — only ever the tenant's own tracked list, optionally
+// filtered by name. Never touches the shared registry: that's what "All
+// Companies" is for.
+export async function listMyCompanies(query) {
+  const trimmed = query.trim()
+  const base = supabase.from('company').select('*').order('name')
+  const { data, error } = await (trimmed ? base.ilike('name', `%${trimmed}%`) : base)
+  if (error) throw error
+  return data.map(asTenantRow)
 }
 
-// Tier 1 + tier 2 in one pass — the tenant's own list, plus the shared registry
-// cache for everything they haven't added.
+// "All Companies" tab — a paginated browse of the shared registry cache
+// (882 000+ rows), optionally filtered by name or org number. Fetches one
+// row past the page size to know whether another page exists, rather than
+// running a COUNT(*) over the whole table on every page turn.
 //
-// An empty box shows only the tenant's own companies. Listing the register
-// itself would mean paging through 882 000 rows, which is a browser, not a CRM
-// list; the register becomes reachable the moment you actually search for
-// something.
-//
-// Tenant rows always come first and are never capped — your own companies
-// shouldn't fall off the end because a common word matched half of Sweden.
-export async function searchCompanies(query) {
+// Rows the tenant already tracks are still returned (this claims to be
+// *all* companies) but flagged via `alreadyAdded` so the UI can show that
+// instead of an "Add" button — see markTracked below.
+export async function listRegistryCompanies({ page = 0, query = '' } = {}) {
   const trimmed = query.trim()
+  const from = page * REGISTRY_PAGE_SIZE
+  const to = from + REGISTRY_PAGE_SIZE // one extra row, to detect a next page
 
-  if (!trimmed) {
-    const { data, error } = await supabase.from('company').select('*').order('name')
-    if (error) throw error
-    return data.map(asTenantRow)
+  let builder = supabase.from('company_registry_cache').select('*').order('name').range(from, to)
+  if (trimmed) {
+    builder = looksLikeOrgNumber(trimmed)
+      ? builder.eq('org_number', normalizeOrgNumber(trimmed))
+      : builder.ilike('name', `%${trimmed}%`)
   }
 
-  const isOrgNumber = looksLikeOrgNumber(trimmed)
-  const normalized = normalizeOrgNumber(trimmed)
+  const { data, error } = await builder
+  if (error) throw error
 
-  const tenantQuery = isOrgNumber
-    ? supabase.from('company').select('*').eq('org_number', normalized)
-    : supabase.from('company').select('*').ilike('name', `%${trimmed}%`).order('name')
+  const hasMore = data.length > REGISTRY_PAGE_SIZE
+  return { rows: data.slice(0, REGISTRY_PAGE_SIZE).map(asRegistryRow), hasMore }
+}
 
-  // Deliberately unordered. `order('name')` forces Postgres to fetch and sort
-  // every match before applying the limit — 335 ms for a broad term — while
-  // the unordered form stops at the first 50 the trigram index yields, in 3–11
-  // ms. The page sorts those 50 itself, which costs nothing.
-  const searchesRegistry = isOrgNumber || trimmed.length >= MIN_REGISTRY_QUERY_LENGTH
-  const registryQuery = !searchesRegistry
-    ? null
-    : isOrgNumber
-      ? supabase.from('company_registry_cache').select('*').eq('org_number', normalized)
-      : supabase
-          .from('company_registry_cache')
-          .select('*')
-          .ilike('name', `%${trimmed}%`)
-          .limit(REGISTRY_RESULT_LIMIT)
+// The set of org numbers the tenant already tracks, for flagging registry
+// rows as `alreadyAdded` in the "All Companies" tab without joining against
+// 882 000+ rows server-side. RLS (company_read) already scopes this to the
+// caller's tenant, same as every other unfiltered `company` select here.
+export async function listTrackedOrgNumbers() {
+  const { data, error } = await supabase.from('company').select('org_number').not('org_number', 'is', null)
+  if (error) throw error
+  return new Set(data.map((row) => row.org_number))
+}
 
-  const [tenantResult, registryResult] = await Promise.all([tenantQuery, registryQuery])
-
-  if (tenantResult.error) throw tenantResult.error
-  if (registryResult?.error) throw registryResult.error
-
-  const tenantRows = tenantResult.data.map(asTenantRow)
-
-  // A company the tenant already tracks must not appear twice — their own row
-  // is the one with status and actions on it, so it wins.
-  const tracked = new Set(tenantRows.map((row) => row.org_number).filter(Boolean))
-  const registryRows = (registryResult?.data ?? [])
-    .filter((row) => !tracked.has(row.org_number))
-    .map(asRegistryRow)
-    .sort(byName)
-
-  return [...tenantRows, ...registryRows]
+export function markTracked(rows, trackedOrgNumbers) {
+  return rows.map((row) => ({ ...row, alreadyAdded: trackedOrgNumbers.has(row.org_number) }))
 }
 
 // Tier 2 — the shared, read-only registry cache. Anyone's prior lookup.
@@ -148,14 +129,11 @@ export async function addCompanyFromRegistry(tenantId, registryRow) {
       company_form: tenantCompanyForm(registryRow.company_form),
       sni_code: registryRow.sni_code,
       industry_label: registryRow.industry_label,
+      description: registryRow.business_description,
       city: registryRow.city,
       address: registryRow.address,
       zip: registryRow.zip,
-      is_active: registryRow.is_active,
-      in_liquidation: registryRow.in_liquidation ?? false,
       no_marketing: registryRow.no_marketing,
-      deregistered_at: registryRow.deregistered_at,
-      deregistration_reason: registryRow.deregistration_reason,
       registered_at: registryRow.registered_at,
       is_manual: false,
     })
@@ -169,7 +147,7 @@ export async function addCompanyFromRegistry(tenantId, registryRow) {
 // Shared field mapping for manual add/edit. org_number is normalized the
 // same way every other write path is (findInRegistryCache,
 // lookupCompanyOnBolagsverket) — otherwise a hand-typed "556677-8899" would
-// never match searchCompanies' normalized exact-match lookup later.
+// never match an org-number lookup elsewhere.
 function manualCompanyFields(fields) {
   return {
     name: fields.name,

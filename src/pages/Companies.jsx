@@ -7,10 +7,13 @@ import { useAuth } from '../context/AuthContext'
 import {
   addCompanyFromRegistry,
   addManualCompany,
+  listMyCompanies,
+  listRegistryCompanies,
+  listTrackedOrgNumbers,
   looksLikeOrgNumber,
   lookupCompanyOnBolagsverket,
+  markTracked,
   removeCompany,
-  searchCompanies,
   updateCompany,
 } from '../lib/companies'
 
@@ -20,68 +23,124 @@ const LOOKUP_ERROR_MESSAGES = {
   LOOKUP_FAILED: 'The lookup failed — try again in a moment.',
 }
 
+const DEBOUNCE_MS = 300
+
 function Companies() {
   const { appUser } = useAuth()
-  const [query, setQuery] = useState('')
-  const [companies, setCompanies] = useState([])
-  const [loading, setLoading] = useState(true)
-  // 'idle' | 'not-in-registry' | 'looking-up' | 'found-in-registry' | 'error'
-  const [lookupState, setLookupState] = useState('idle')
-  const [registryHit, setRegistryHit] = useState(null)
-  const [lookupError, setLookupError] = useState(null)
+  const isAdmin = appUser?.role === 'admin'
+
+  // Which of the two tables is visible. Switching tabs never throws away the
+  // other tab's state — both keep their own query/page, so flipping back and
+  // forth doesn't re-fetch or reset a search someone was in the middle of.
+  const [activeTab, setActiveTab] = useState('mine')
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [selectedRowKey, setSelectedRowKey] = useState(null)
   const [editingCompany, setEditingCompany] = useState(null)
   const [reloadToken, setReloadToken] = useState(0)
-  const [searchError, setSearchError] = useState(null)
 
-  const isAdmin = appUser?.role === 'admin'
+  // Org numbers the tenant already tracks — lets "All Companies" flag a row
+  // as already added without re-fetching that whole page after every add.
+  const [trackedOrgNumbers, setTrackedOrgNumbers] = useState(new Set())
+
+  useEffect(() => {
+    let active = true
+    listTrackedOrgNumbers()
+      .then((set) => active && setTrackedOrgNumbers(set))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [reloadToken])
+
+  // ---------------------------------------------------------------------
+  // "My Companies" — the tenant's own tracked list.
+  // ---------------------------------------------------------------------
+  const [myQuery, setMyQuery] = useState('')
+  const [myCompanies, setMyCompanies] = useState([])
+  const [myLoading, setMyLoading] = useState(true)
+  const [myError, setMyError] = useState(null)
 
   useEffect(() => {
     let active = true
     const timeout = setTimeout(async () => {
-      setLoading(true)
-      let results
+      setMyLoading(true)
       try {
-        results = await searchCompanies(query)
-      } catch (err) {
-        // The search now spans the shared registry too, so a failure here is
-        // no longer just "your own list is empty" — surface it rather than
-        // leaving the table silently stuck on its previous contents.
+        const results = await listMyCompanies(myQuery)
         if (!active) return
-        setSearchError(err.message ?? 'Search failed')
-        setCompanies([])
-        setLoading(false)
-        setLookupState('idle')
-        return
+        setMyCompanies(results)
+        setMyError(null)
+      } catch (err) {
+        if (!active) return
+        setMyError(err.message ?? 'Search failed')
+        setMyCompanies([])
+      } finally {
+        if (active) setMyLoading(false)
       }
-      if (!active) return
-      setSearchError(null)
-      setCompanies(results)
-      setLoading(false)
-
-      // searchCompanies now covers tiers 1 and 2 in one go, so an empty result
-      // for an org number already means "not in your list and not in the
-      // shared registry either". The only thing left to try is tier 3.
-      const trimmed = query.trim()
-      setRegistryHit(null)
-      setLookupState(
-        trimmed && looksLikeOrgNumber(trimmed) && results.length === 0 ? 'not-in-registry' : 'idle',
-      )
-    }, 300)
+    }, DEBOUNCE_MS)
 
     return () => {
       active = false
       clearTimeout(timeout)
     }
-  }, [query, reloadToken])
+  }, [myQuery, reloadToken])
+
+  // ---------------------------------------------------------------------
+  // "All Companies" — a paginated browse of the shared registry cache.
+  // ---------------------------------------------------------------------
+  const [allQuery, setAllQuery] = useState('')
+  const [allPage, setAllPage] = useState(0)
+  const [allRows, setAllRows] = useState([])
+  const [allHasMore, setAllHasMore] = useState(false)
+  const [allLoading, setAllLoading] = useState(true)
+  const [allError, setAllError] = useState(null)
+
+  // A query edit always jumps back to page 0 — paging through stale results
+  // from the previous search would be confusing.
+  function handleAllQueryChange(value) {
+    setAllQuery(value)
+    setAllPage(0)
+  }
+
+  // 'idle' | 'not-in-registry' | 'looking-up' | 'found-in-registry' | 'error'
+  const [lookupState, setLookupState] = useState('idle')
+  const [registryHit, setRegistryHit] = useState(null)
+  const [lookupError, setLookupError] = useState(null)
+
+  useEffect(() => {
+    let active = true
+    const timeout = setTimeout(async () => {
+      setAllLoading(true)
+      try {
+        const { rows, hasMore } = await listRegistryCompanies({ page: allPage, query: allQuery })
+        if (!active) return
+        setAllRows(rows)
+        setAllHasMore(hasMore)
+        setAllError(null)
+
+        const trimmed = allQuery.trim()
+        setRegistryHit(null)
+        setLookupState(trimmed && looksLikeOrgNumber(trimmed) && rows.length === 0 ? 'not-in-registry' : 'idle')
+      } catch (err) {
+        if (!active) return
+        setAllError(err.message ?? 'Search failed')
+        setAllRows([])
+      } finally {
+        if (active) setAllLoading(false)
+      }
+    }, DEBOUNCE_MS)
+
+    return () => {
+      active = false
+      clearTimeout(timeout)
+    }
+  }, [allQuery, allPage, reloadToken])
 
   async function handleLookup() {
     setLookupState('looking-up')
     setLookupError(null)
     try {
-      const row = await lookupCompanyOnBolagsverket(query.trim())
+      const row = await lookupCompanyOnBolagsverket(allQuery.trim())
       setRegistryHit(row)
       setLookupState('found-in-registry')
     } catch (err) {
@@ -90,12 +149,19 @@ function Companies() {
     }
   }
 
-  // Adding or removing changes which rows count as tracked, and therefore how
-  // searchCompanies merges and de-duplicates them. Re-running the search is
-  // what keeps that logic in one place instead of splicing the list by hand
-  // here and getting a row that shows as both tracked and untracked.
+  // Adding or removing changes which org numbers count as tracked. Re-running
+  // both tabs' fetches (and the tracked-set fetch) is what keeps that in one
+  // place instead of splicing rows by hand and getting a row that shows as
+  // both tracked and untracked.
   function reload() {
     setReloadToken((current) => current + 1)
+  }
+
+  function switchTab(tab) {
+    setActiveTab(tab)
+    setShowAddForm(false)
+    setEditingCompany(null)
+    setSelectedRowKey(null)
   }
 
   async function handleAdd(registryRow) {
@@ -168,82 +234,158 @@ function Companies() {
     setShowAddForm(false)
   }
 
+  const allCompaniesDisplayed = markTracked(allRows, trackedOrgNumbers)
+
   return (
     <>
       <h1>Companies</h1>
 
-      <div className="companies-toolbar">
-        <CompanySearchBar value={query} onChange={setQuery} />
+      <div className="company-tabs" role="tablist">
         <button
           type="button"
-          className="btn"
-          onClick={() => {
-            setShowAddForm((current) => !current)
-            setEditingCompany(null)
-          }}
+          role="tab"
+          aria-selected={activeTab === 'mine'}
+          className={`company-tab${activeTab === 'mine' ? ' company-tab-active' : ''}`}
+          onClick={() => switchTab('mine')}
         >
-          {showAddForm ? 'Cancel' : '+ Add company'}
+          My Companies
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'all'}
+          className={`company-tab${activeTab === 'all' ? ' company-tab-active' : ''}`}
+          onClick={() => switchTab('all')}
+        >
+          All Companies
         </button>
       </div>
 
-      {showAddForm && (
-        <CompanyForm
-          initialValues={{}}
-          submitLabel="Add company"
-          onSubmit={handleAddManual}
-          onCancel={() => setShowAddForm(false)}
-        />
+      {activeTab === 'mine' && (
+        <>
+          <div className="companies-toolbar">
+            <CompanySearchBar value={myQuery} onChange={setMyQuery} />
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setShowAddForm((current) => !current)
+                setEditingCompany(null)
+              }}
+            >
+              {showAddForm ? 'Cancel' : '+ Add company'}
+            </button>
+          </div>
+
+          {showAddForm && (
+            <CompanyForm
+              initialValues={{}}
+              submitLabel="Add company"
+              onSubmit={handleAddManual}
+              onCancel={() => setShowAddForm(false)}
+            />
+          )}
+
+          {editingCompany && (
+            <CompanyForm
+              initialValues={editingCompany}
+              submitLabel="Save changes"
+              onSubmit={handleSaveEdit}
+              onCancel={() => setEditingCompany(null)}
+            />
+          )}
+
+          {myError && <p className="company-search-error">Search failed: {myError}</p>}
+
+          {myLoading ? (
+            <p>Loading…</p>
+          ) : (
+            <CompanyTable
+              companies={myCompanies}
+              canRemove={isAdmin}
+              onRemove={handleRemove}
+              onAdd={handleAdd}
+              selectedRowKey={selectedRowKey}
+              onRowClick={handleRowClick}
+              onRowDoubleClick={handleRowDoubleClick}
+              onEdit={handleEdit}
+            />
+          )}
+        </>
       )}
 
-      {editingCompany && (
-        <CompanyForm
-          initialValues={editingCompany}
-          submitLabel="Save changes"
-          onSubmit={handleSaveEdit}
-          onCancel={() => setEditingCompany(null)}
-        />
-      )}
+      {activeTab === 'all' && (
+        <>
+          <div className="companies-toolbar">
+            <CompanySearchBar value={allQuery} onChange={handleAllQueryChange} />
+          </div>
 
-      {searchError && <p className="company-search-error">Search failed: {searchError}</p>}
+          {allError && <p className="company-search-error">Search failed: {allError}</p>}
 
-      {loading ? (
-        <p>Loading…</p>
-      ) : (
-        <CompanyTable
-          companies={companies}
-          canRemove={isAdmin}
-          onRemove={handleRemove}
-          onAdd={handleAdd}
-          selectedRowKey={selectedRowKey}
-          onRowClick={handleRowClick}
-          onRowDoubleClick={handleRowDoubleClick}
-          onEdit={handleEdit}
-        />
-      )}
+          {allLoading ? (
+            <p>Loading…</p>
+          ) : (
+            <>
+              <CompanyTable
+                companies={allCompaniesDisplayed}
+                canRemove={false}
+                onRemove={handleRemove}
+                onAdd={handleAdd}
+                selectedRowKey={selectedRowKey}
+                onRowClick={handleRowClick}
+                onRowDoubleClick={handleRowDoubleClick}
+                onEdit={handleEdit}
+              />
 
-      {lookupState === 'not-in-registry' && (
-        <div className="company-lookup-prompt">
-          <p>Not in your list or the shared registry yet.</p>
-          <button className="btn" onClick={handleLookup}>
-            Look up {query.trim()} on Bolagsverket
-          </button>
-        </div>
-      )}
+              {(allPage > 0 || allHasMore) && (
+                <div className="company-pagination">
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={allPage === 0}
+                    onClick={() => setAllPage((current) => Math.max(0, current - 1))}
+                  >
+                    ← Previous
+                  </button>
+                  <span className="company-pagination-page">Page {allPage + 1}</span>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!allHasMore}
+                    onClick={() => setAllPage((current) => current + 1)}
+                  >
+                    Next →
+                  </button>
+                </div>
+              )}
+            </>
+          )}
 
-      {lookupState === 'looking-up' && <p>Looking up {query.trim()} on Bolagsverket…</p>}
+          {lookupState === 'not-in-registry' && (
+            <div className="company-lookup-prompt">
+              <p>Not in the shared registry yet.</p>
+              <button className="btn" onClick={handleLookup}>
+                Look up {allQuery.trim()} on Bolagsverket
+              </button>
+            </div>
+          )}
 
-      {lookupState === 'error' && <p>{lookupError}</p>}
+          {lookupState === 'looking-up' && <p>Looking up {allQuery.trim()} on Bolagsverket…</p>}
 
-      {lookupState === 'found-in-registry' && registryHit && (
-        <div className="company-lookup-prompt">
-          <p>
-            Fetched from Bolagsverket: <strong>{registryHit.name}</strong> (
-            {registryHit.org_number}) — not yet in your list.
-          </p>
-          <button className="btn" onClick={() => handleAdd(registryHit)}>
-            Add to my companies
-          </button>
-        </div>
+          {lookupState === 'error' && <p>{lookupError}</p>}
+
+          {lookupState === 'found-in-registry' && registryHit && (
+            <div className="company-lookup-prompt">
+              <p>
+                Fetched from Bolagsverket: <strong>{registryHit.name}</strong> (
+                {registryHit.org_number}) — not yet in your list.
+              </p>
+              <button className="btn" onClick={() => handleAdd(registryHit)}>
+                Add to my companies
+              </button>
+            </div>
+          )}
+        </>
       )}
     </>
   )

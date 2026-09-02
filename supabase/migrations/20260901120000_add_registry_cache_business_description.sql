@@ -16,4 +16,4 @@
 -- ============================================================================
 
 alter table company_registry_cache
-  add column business_description text;
+  add column if not exists business_description text;
