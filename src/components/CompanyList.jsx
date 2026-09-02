@@ -22,9 +22,30 @@ function metaLine(company) {
     company.org_number ?? '—',
     COMPANY_FORM_LABELS[company.company_form] ?? company.company_form ?? '—',
     company.city,
+    company.sni_code ? `SNI ${company.sni_code}` : null,
   ]
     .filter(Boolean)
     .join(' · ')
+}
+
+// contact_eligibility only ever produces one of three shapes (see
+// eligibilityBadge in pages/Companies.jsx): available, in-contact (the
+// viewer made the last contact), or cooldown (a teammate did — shown as two
+// badges together since "who" and "how long" are both worth knowing).
+function EligibilityBadges({ eligibility }) {
+  if (!eligibility) return null
+  if (eligibility.kind === 'available') {
+    return <span className="badge badge-available">Available</span>
+  }
+  if (eligibility.kind === 'in-contact') {
+    return <span className="badge badge-in-contact">In contact</span>
+  }
+  return (
+    <>
+      <span className="badge badge-cooldown">Cooldown, {eligibility.daysLeft}d left</span>
+      <span className="badge badge-neutral">Contacted by {eligibility.contactedBy}</span>
+    </>
+  )
 }
 
 function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit }) {
@@ -48,24 +69,22 @@ function CompanyList({ companies, canRemove, onRemove, onAdd, onEdit }) {
             >
               <span className="company-card-chevron">{expanded ? '▾' : '▸'}</span>
               <span className="company-card-heading">
-                <span className="company-card-name">
-                  {company.name}
-                  {company.no_marketing && (
-                    <span
-                      className="badge badge-neutral badge-inline"
-                      title="Reklamspärr — opted out of marketing contact"
-                    >
-                      No marketing
-                    </span>
-                  )}
-                </span>
+                <span className="company-card-name">{company.name}</span>
                 <span className="company-card-meta">{metaLine(company)}</span>
               </span>
-              {!company.tracked && company.alreadyAdded && (
-                <span className="company-card-added" title="Already in your companies">
-                  ✓ Added
-                </span>
-              )}
+              <span className="company-card-badges">
+                {company.no_marketing && (
+                  <span className="badge badge-neutral" title="Reklamspärr — opted out of marketing contact">
+                    No marketing
+                  </span>
+                )}
+                {company.tracked && <EligibilityBadges eligibility={company.eligibility} />}
+                {!company.tracked && company.alreadyAdded && (
+                  <span className="company-card-added" title="Already in your companies">
+                    ✓ Added
+                  </span>
+                )}
+              </span>
             </button>
 
             {expanded && (

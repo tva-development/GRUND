@@ -99,6 +99,32 @@ export function markTracked(rows, trackedOrgNumbers) {
   return rows.map((row) => ({ ...row, alreadyAdded: trackedOrgNumbers.has(row.org_number) }))
 }
 
+// contact_eligibility only covers tracked rows (it's a view over `company`),
+// so registry-only rows never get an eligibility badge. Keyed by company_id
+// for O(1) lookup when rendering. last_user_id has no FK PostgREST can embed
+// through a view, so the name lookup is a second query, merged here.
+export async function listEligibility() {
+  const { data, error } = await supabase
+    .from('contact_eligibility')
+    .select('company_id, available, days_left, last_user_id')
+  if (error) throw error
+
+  const userIds = [...new Set(data.map((row) => row.last_user_id).filter(Boolean))]
+  const names = {}
+  if (userIds.length > 0) {
+    const { data: users, error: userError } = await supabase.from('app_user').select('id, name').in('id', userIds)
+    if (userError) throw userError
+    for (const user of users) names[user.id] = user.name
+  }
+
+  return Object.fromEntries(
+    data.map((row) => [
+      row.company_id,
+      { ...row, lastUserName: row.last_user_id ? (names[row.last_user_id] ?? 'a teammate') : null },
+    ]),
+  )
+}
+
 // Tier 2 — the shared, read-only registry cache. Anyone's prior lookup.
 export async function findInRegistryCache(orgNumber) {
   const { data, error } = await supabase

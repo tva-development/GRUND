@@ -221,6 +221,21 @@ textarea:focus-visible {
   color: var(--slate);
 }
 
+.badge-available {
+  background: #dcf3e4;
+  color: #1a7a3f;
+}
+
+.badge-cooldown {
+  background: #fbecd0;
+  color: #93590a;
+}
+
+.badge-in-contact {
+  background: #fbdede;
+  color: #a4222c;
+}
+
 .company-lookup-prompt {
   margin-top: 16px;
   padding: 14px 16px;
@@ -298,6 +313,15 @@ textarea:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.company-card-badges {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 45%;
 }
 
 .company-card-added {

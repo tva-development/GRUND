@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   addCompanyFromRegistry,
   addManualCompany,
+  listEligibility,
   listMyCompanies,
   listRegistryCompanies,
   listTrackedOrgNumbers,
@@ -16,6 +17,16 @@ import {
   removeCompany,
   updateCompany,
 } from '../lib/companies'
+
+// contact_eligibility gives available/days_left/last_user_id; this decides
+// which of the four badges that becomes for the person looking at it. Cards
+// only see the result of this, never the raw eligibility row.
+function eligibilityBadge(eligibility, currentUserId) {
+  if (!eligibility) return null
+  if (eligibility.available) return { kind: 'available' }
+  if (eligibility.last_user_id === currentUserId) return { kind: 'in-contact' }
+  return { kind: 'cooldown', daysLeft: eligibility.days_left, contactedBy: eligibility.lastUserName }
+}
 
 const LOOKUP_ERROR_MESSAGES = {
   INVALID_ORG_NUMBER: "That doesn't look like a valid Swedish org number.",
@@ -46,6 +57,21 @@ function Companies() {
     let active = true
     listTrackedOrgNumbers()
       .then((set) => active && setTrackedOrgNumbers(set))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [reloadToken])
+
+  // Cooldown/contact-history badge data, keyed by company_id. Only ever
+  // relevant to "My Companies" — contact_eligibility has no rows for
+  // companies nobody's tracking yet.
+  const [eligibilityByCompany, setEligibilityByCompany] = useState({})
+
+  useEffect(() => {
+    let active = true
+    listEligibility()
+      .then((byCompany) => active && setEligibilityByCompany(byCompany))
       .catch(() => {})
     return () => {
       active = false
@@ -215,6 +241,10 @@ function Companies() {
   }
 
   const allCompaniesDisplayed = markTracked(allRows, trackedOrgNumbers)
+  const myCompaniesDisplayed = myCompanies.map((company) => ({
+    ...company,
+    eligibility: eligibilityBadge(eligibilityByCompany[company.id], appUser?.id),
+  }))
 
   return (
     <>
@@ -282,7 +312,7 @@ function Companies() {
             <p>Loading…</p>
           ) : (
             <CompanyList
-              companies={myCompanies}
+              companies={myCompaniesDisplayed}
               canRemove={isAdmin}
               onRemove={handleRemove}
               onAdd={handleAdd}
