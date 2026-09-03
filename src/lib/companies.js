@@ -153,12 +153,14 @@ export async function listEligibility() {
   )
 }
 
-// "In contact" is a two-step, reversible action, not a direct log — clicking
-// it immediately used to call log_interaction(), which starts the 14-day
-// cooldown right away with no way back (interaction is append-only, no
-// delete/update path). in_contact_by is a plain company column instead:
-// freely settable/clearable on company's normal update grant, with no
-// cooldown implication until it's explicitly confirmed.
+// "In contact" is a two-step action. Marking it doesn't touch `interaction`
+// at all -- in_contact_by is a plain company column, freely settable on
+// company's normal update grant, so a mis-click costs nothing on its own.
+// Un-marking ("Not in contact anymore") always commits the cooldown via
+// log_interaction() -- per PRD V1, the cooldown rule has to be enforced at
+// the data layer, not offered as a skippable UI choice, so there is no
+// "clear without starting a cooldown" path. If a cooldown genuinely
+// shouldn't have started, that's what resetCooldown (admin-only) is for.
 
 // Step 1: mark. Doesn't touch `interaction` at all.
 export async function setInContactMarker(companyId, userId) {
@@ -166,14 +168,15 @@ export async function setInContactMarker(companyId, userId) {
   if (error) throw error
 }
 
-// Step 2a: un-mark without starting a cooldown -- it was set by mistake, or
-// the outreach never actually happened.
-export async function clearInContactMarker(companyId) {
+// Internal: clears the marker once a cooldown has actually been committed
+// (see confirmInContactCooldown) -- the interaction row is the source of
+// truth from that point on, so the marker would just be a stale duplicate.
+async function clearInContactMarker(companyId) {
   const { error } = await supabase.from('company').update({ in_contact_by: null }).eq('id', companyId)
   if (error) throw error
 }
 
-// Step 2b: un-mark AND commit the cooldown via log_interaction() -- the only
+// Step 2: un-mark AND commit the cooldown via log_interaction() -- the only
 // write path into `interaction`. On failure (COOLDOWN_ACTIVE, e.g. someone
 // else logged a fresher contact in the meantime) the marker is left alone
 // so the caller's "I was in contact" state isn't silently lost.
@@ -185,6 +188,17 @@ export async function confirmInContactCooldown(companyId) {
   })
   if (error) throw error
   await clearInContactMarker(companyId)
+}
+
+// Admin-only escape hatch for a genuine mistake (marked the wrong company,
+// fat-fingered "Not in contact anymore"). Doesn't touch `interaction` --
+// still append-only -- it sets a company-level marker contact_eligibility
+// treats as superseding the last interaction. is_admin() is enforced inside
+// the function itself, not just client-side, since this specifically undoes
+// the cooldown rule the product exists to enforce.
+export async function resetCooldown(companyId) {
+  const { error } = await supabase.rpc('reset_cooldown', { p_company_id: companyId })
+  if (error) throw error
 }
 
 // Companies the current viewer is in contact with, marker or committed

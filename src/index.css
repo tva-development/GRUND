@@ -111,17 +111,16 @@ textarea:focus-visible {
   opacity: 0.6;
 }
 
-/* Same dark/primary treatment as .btn, sized to sit inline with .row-action
-   siblings — for the one option in a choice that's worth defaulting to. */
-.btn-small {
-  font-size: 0.8125rem;
-  padding: 4px 10px;
-  border-radius: 6px;
+.company-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 420px;
+  max-width: 420px;
 }
 
 .company-search {
   width: 100%;
-  max-width: 420px;
   padding: 10px 12px;
   margin: 4px 0 20px;
   border: 1px solid var(--border);
@@ -129,6 +128,22 @@ textarea:focus-visible {
   background: var(--paper-raised);
   color: var(--ink);
   font-size: 0.9375rem;
+}
+
+.company-search-clear {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--slate);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.company-search-clear:hover {
+  color: var(--ink);
 }
 
 .company-tabs {
@@ -276,6 +291,20 @@ textarea:focus-visible {
   overflow: hidden;
 }
 
+/* The clickable expand/collapse row and the quick-add button next to it are
+   separate elements (not button-in-button) so the add action works without
+   opening the card first, and so it never fights the row's own click. */
+.company-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 14px;
+}
+
+.company-card-quick-add {
+  flex: none;
+}
+
 .company-card-summary {
   width: 100%;
   display: flex;
@@ -288,10 +317,16 @@ textarea:focus-visible {
   text-align: left;
   font: inherit;
   color: inherit;
+  user-select: none;
 }
 
 .company-card-summary:hover {
   background: var(--border);
+}
+
+.company-card-summary:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: -2px;
 }
 
 .company-card-chevron {
@@ -308,11 +343,17 @@ textarea:focus-visible {
   gap: 2px;
 }
 
+/* Org number, name, legal form and SNI are things people copy out to paste
+   elsewhere — selectable/copyable despite living inside a click-to-expand
+   row. toggleExpanded checks for an active selection before toggling, so
+   dragging across this text doesn't also open/close the card. */
 .company-card-name {
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: text;
+  cursor: text;
 }
 
 .company-card-meta {
@@ -321,6 +362,8 @@ textarea:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: text;
+  cursor: text;
 }
 
 .company-card-badges {
@@ -360,13 +403,6 @@ textarea:focus-visible {
   align-items: center;
   flex-wrap: wrap;
   margin-top: 12px;
-}
-
-.company-card-confirm {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
 }
 
 .company-card-tags {

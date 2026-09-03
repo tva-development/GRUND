@@ -8,7 +8,6 @@ import {
   addCompanyFromRegistry,
   addManualCompany,
   addTagToCompany,
-  clearInContactMarker,
   confirmInContactCooldown,
   listCompanyTags,
   listEligibility,
@@ -21,6 +20,7 @@ import {
   markTracked,
   removeCompany,
   removeTagFromCompany,
+  resetCooldown,
   resolveUserNames,
   setInContactMarker,
   updateCompany,
@@ -63,7 +63,9 @@ function Companies() {
   // Which of the two tables is visible. Switching tabs never throws away the
   // other tab's state — both keep their own query/page, so flipping back and
   // forth doesn't re-fetch or reset a search someone was in the middle of.
-  const [activeTab, setActiveTab] = useState('mine')
+  // Defaults to "all": the shared registry is the primary discovery
+  // surface, "My Companies" a personal bookmark list layered on top of it.
+  const [activeTab, setActiveTab] = useState('all')
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingCompany, setEditingCompany] = useState(null)
@@ -306,13 +308,16 @@ function Companies() {
     }
   }
 
-  async function handleEndInContact(company, { startCooldown }) {
+  // "Not in contact anymore" always commits the cooldown -- no skip option,
+  // per PRD V1 (the rule has to be enforced at the data layer, not offered
+  // as an easy-to-skip UI choice). If it's already blocked by someone
+  // else's fresher contact, the marker is left as-is (see
+  // confirmInContactCooldown) so nothing is lost — an admin can Reset
+  // cooldown on whichever company is actually blocking it, or it clears
+  // itself once that cooldown naturally expires.
+  async function handleEndInContact(company) {
     try {
-      if (startCooldown) {
-        await confirmInContactCooldown(company.id)
-      } else {
-        await clearInContactMarker(company.id)
-      }
+      await confirmInContactCooldown(company.id)
       reload()
     } catch (err) {
       if (err.message === 'COOLDOWN_ACTIVE') {
@@ -326,11 +331,23 @@ function Companies() {
           (daysLeft != null
             ? `Could not start the cooldown — someone else already has ${daysLeft} day${daysLeft === 1 ? '' : 's'} left on ${company.name}.`
             : `Could not start the cooldown for ${company.name}.`) +
-            ' The "in contact" mark is still there — you can remove it without starting a cooldown instead.',
+            ' The "in contact" mark is still there — try again once that cooldown clears, or ask an admin to reset it.',
         )
         return
       }
       window.alert(`Could not update contact status: ${err.message}`)
+    }
+  }
+
+  async function handleResetCooldown(company) {
+    if (!window.confirm(`Reset the cooldown on ${company.name}? They'll show as available again immediately.`)) {
+      return
+    }
+    try {
+      await resetCooldown(company.id)
+      reload()
+    } catch (err) {
+      window.alert(`Could not reset cooldown: ${err.message}`)
     }
   }
 
@@ -368,37 +385,34 @@ function Companies() {
         <button
           type="button"
           role="tab"
-          aria-selected={activeTab === 'mine'}
-          className={`company-tab${activeTab === 'mine' ? ' company-tab-active' : ''}`}
-          onClick={() => switchTab('mine')}
-        >
-          My Companies
-        </button>
-        <button
-          type="button"
-          role="tab"
           aria-selected={activeTab === 'all'}
           className={`company-tab${activeTab === 'all' ? ' company-tab-active' : ''}`}
           onClick={() => switchTab('all')}
         >
           All Companies
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'mine'}
+          className={`company-tab${activeTab === 'mine' ? ' company-tab-active' : ''}`}
+          onClick={() => switchTab('mine')}
+        >
+          My Companies
+        </button>
       </div>
 
-      {activeTab === 'mine' && (
+      {activeTab === 'all' && (
         <>
           <div className="companies-toolbar">
-            <CompanySearchBar value={myQuery} onChange={setMyQuery} />
+            <CompanySearchBar value={allQuery} onChange={handleAllQueryChange} />
             <button
               type="button"
               className="btn"
-              title="For a company not in the shared registry — search All Companies first"
-              onClick={() => {
-                setShowAddForm((current) => !current)
-                setEditingCompany(null)
-              }}
+              title="For a company that isn't in the shared registry"
+              onClick={() => setShowAddForm((current) => !current)}
             >
-              {showAddForm ? 'Cancel' : "+ Add a company not in the registry"}
+              {showAddForm ? 'Cancel' : '+ Add a company not in the registry'}
             </button>
           </div>
 
@@ -411,42 +425,6 @@ function Companies() {
             />
           )}
 
-          {editingCompany && (
-            <CompanyForm
-              initialValues={editingCompany}
-              submitLabel="Save changes"
-              onSubmit={handleSaveEdit}
-              onCancel={() => setEditingCompany(null)}
-            />
-          )}
-
-          {myError && <p className="company-search-error">Search failed: {myError}</p>}
-
-          {myLoading ? (
-            <p>Loading…</p>
-          ) : (
-            <CompanyList
-              companies={myCompaniesDisplayed}
-              canRemove={isAdmin}
-              onRemove={handleRemove}
-              onAdd={handleAdd}
-              onEdit={handleEdit}
-              onSetInContact={handleSetInContact}
-              onEndInContact={handleEndInContact}
-              allTags={allTags}
-              onAddTag={handleAddTag}
-              onRemoveTag={handleRemoveTag}
-            />
-          )}
-        </>
-      )}
-
-      {activeTab === 'all' && (
-        <>
-          <div className="companies-toolbar">
-            <CompanySearchBar value={allQuery} onChange={handleAllQueryChange} />
-          </div>
-
           {allError && <p className="company-search-error">Search failed: {allError}</p>}
 
           {allLoading ? (
@@ -455,7 +433,7 @@ function Companies() {
             <>
               <CompanyList
                 companies={allCompaniesDisplayed}
-                canRemove={false}
+                isAdmin={isAdmin}
                 onRemove={handleRemove}
                 onAdd={handleAdd}
                 onEdit={handleEdit}
@@ -508,6 +486,43 @@ function Companies() {
                 Add to my companies
               </button>
             </div>
+          )}
+        </>
+      )}
+
+      {activeTab === 'mine' && (
+        <>
+          <div className="companies-toolbar">
+            <CompanySearchBar value={myQuery} onChange={setMyQuery} />
+          </div>
+
+          {editingCompany && (
+            <CompanyForm
+              initialValues={editingCompany}
+              submitLabel="Save changes"
+              onSubmit={handleSaveEdit}
+              onCancel={() => setEditingCompany(null)}
+            />
+          )}
+
+          {myError && <p className="company-search-error">Search failed: {myError}</p>}
+
+          {myLoading ? (
+            <p>Loading…</p>
+          ) : (
+            <CompanyList
+              companies={myCompaniesDisplayed}
+              isAdmin={isAdmin}
+              onRemove={handleRemove}
+              onAdd={handleAdd}
+              onEdit={handleEdit}
+              onSetInContact={handleSetInContact}
+              onEndInContact={handleEndInContact}
+              onResetCooldown={handleResetCooldown}
+              allTags={allTags}
+              onAddTag={handleAddTag}
+              onRemoveTag={handleRemoveTag}
+            />
           )}
         </>
       )}

@@ -28,6 +28,14 @@ function metaLine(company) {
     .join(' · ')
 }
 
+// A click that ends a text selection still fires a click event on mouseup —
+// without this check, dragging to select an org number or a name would also
+// toggle the card open/closed out from under you.
+function hasActiveSelection() {
+  const selection = window.getSelection()
+  return !!selection && selection.toString().length > 0
+}
+
 // See eligibilityBadge in pages/Companies.jsx for how these four shapes get
 // picked: available, in-contact (the viewer's own reversible marker —
 // there's no "committed by me" variant, see the comment there), contacting
@@ -85,26 +93,30 @@ function TagInput({ company, onAdd }) {
 
 // Every handler is optional so the same list can be reused read-only (the
 // Overview page's "who am I in contact with" tracker passes none of them,
-// and the corresponding buttons just don't render).
+// and the corresponding buttons just don't render). `isAdmin` gates both
+// Remove and Reset cooldown — same permission, two different actions.
 function CompanyList({
   companies,
-  canRemove,
+  isAdmin,
   onRemove,
   onAdd,
   onEdit,
   onSetInContact,
   onEndInContact,
+  onResetCooldown,
   allTags,
   onAddTag,
   onRemoveTag,
 }) {
   const [expandedKey, setExpandedKey] = useState(null)
-  // Which card is mid-way through "Not in contact anymore" — showing the
-  // start-cooldown-or-not choice rather than having already committed to one.
-  const [confirmingKey, setConfirmingKey] = useState(null)
 
   if (companies.length === 0) {
     return <p>No companies match your search yet.</p>
+  }
+
+  function toggleExpanded(rowKey) {
+    if (hasActiveSelection()) return
+    setExpandedKey((current) => (current === rowKey ? null : rowKey))
   }
 
   return (
@@ -118,155 +130,150 @@ function CompanyList({
       )}
       <ul className="company-list">
         {companies.map((company) => {
-        const expanded = company.rowKey === expandedKey
-        return (
-          <li key={company.rowKey} className="company-card">
-            <button
-              type="button"
-              className="company-card-summary"
-              aria-expanded={expanded}
-              onClick={() => setExpandedKey((current) => (current === company.rowKey ? null : company.rowKey))}
-            >
-              <span className="company-card-chevron">{expanded ? '▾' : '▸'}</span>
-              <span className="company-card-heading">
-                <span className="company-card-name">{company.name}</span>
-                <span className="company-card-meta">{metaLine(company)}</span>
-              </span>
-              <span className="company-card-badges">
-                {company.no_marketing && (
-                  <span className="badge badge-neutral" title="Reklamspärr — opted out of marketing contact">
-                    No marketing
+          const expanded = company.rowKey === expandedKey
+          const canQuickAdd = !company.tracked && !company.alreadyAdded && onAdd
+          return (
+            <li key={company.rowKey} className="company-card">
+              <div className="company-card-header">
+                <div
+                  className="company-card-summary"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={expanded}
+                  onClick={() => toggleExpanded(company.rowKey)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    toggleExpanded(company.rowKey)
+                  }}
+                >
+                  <span className="company-card-chevron">{expanded ? '▾' : '▸'}</span>
+                  <span className="company-card-heading">
+                    <span className="company-card-name">{company.name}</span>
+                    <span className="company-card-meta">{metaLine(company)}</span>
                   </span>
-                )}
-                {(company.tags ?? []).map((tag) => (
-                  <span key={tag.id} className="badge badge-neutral">
-                    {tag.name}
-                  </span>
-                ))}
-                {company.tracked && <EligibilityBadges eligibility={company.eligibility} />}
-                {!company.tracked && company.alreadyAdded && (
-                  <span className="company-card-added" title="Already in your companies">
-                    ✓ Added
-                  </span>
-                )}
-              </span>
-            </button>
-
-            {expanded && (
-              <div className="company-card-detail">
-                {company.address && (
-                  <p className="company-card-detail-row">
-                    <strong>Address:</strong> {company.address}
-                    {company.zip ? `, ${company.zip}` : ''} {company.city ?? ''}
-                  </p>
-                )}
-                {company.industry_label && (
-                  <p className="company-card-detail-row">
-                    <strong>Industry:</strong> {company.industry_label}
-                  </p>
-                )}
-                {company.daysLeft != null && (
-                  <p className="company-card-detail-row">
-                    <strong>Cooldown ends in:</strong> {company.daysLeft} day{company.daysLeft === 1 ? '' : 's'}
-                  </p>
-                )}
-                <p className="company-card-description">
-                  {description(company) || 'No business description available.'}
-                </p>
-
-                {company.tracked && (onAddTag || (company.tags ?? []).length > 0) && (
-                  <div className="company-card-tags">
+                  <span className="company-card-badges">
+                    {company.no_marketing && (
+                      <span className="badge badge-neutral" title="Reklamspärr — opted out of marketing contact">
+                        No marketing
+                      </span>
+                    )}
                     {(company.tags ?? []).map((tag) => (
                       <span key={tag.id} className="badge badge-neutral">
                         {tag.name}
-                        {onRemoveTag && (
-                          <button
-                            type="button"
-                            className="company-card-tag-remove"
-                            onClick={() => onRemoveTag(company, tag.id)}
-                            aria-label={`Remove tag ${tag.name}`}
-                          >
-                            ×
-                          </button>
-                        )}
                       </span>
                     ))}
-                    {onAddTag && <TagInput company={company} onAdd={onAddTag} />}
-                  </div>
-                )}
-
-                <div className="company-card-actions">
-                  {!company.tracked && !company.alreadyAdded && onAdd && (
-                    <button type="button" className="row-action" onClick={() => onAdd(company)}>
-                      + Add to my companies
-                    </button>
-                  )}
-                  {!company.tracked && company.alreadyAdded && (
-                    <span className="row-note">Already in your companies</span>
-                  )}
-                  {company.tracked &&
-                    onSetInContact &&
-                    (!company.eligibility || company.eligibility.kind === 'available') && (
-                      <button type="button" className="row-action" onClick={() => onSetInContact(company)}>
-                        In contact
-                      </button>
-                    )}
-                  {company.tracked &&
-                    onEndInContact &&
-                    company.eligibility?.kind === 'in-contact' &&
-                    (confirmingKey === company.rowKey ? (
-                      <span className="company-card-confirm">
-                        <span className="row-note">
-                          Company policy: outreach starts a 14-day cooldown.
-                        </span>
-                        <button
-                          type="button"
-                          className="btn btn-small"
-                          onClick={() => {
-                            onEndInContact(company, { startCooldown: true })
-                            setConfirmingKey(null)
-                          }}
-                        >
-                          Start cooldown
-                        </button>
-                        <button
-                          type="button"
-                          className="row-action"
-                          onClick={() => {
-                            onEndInContact(company, { startCooldown: false })
-                            setConfirmingKey(null)
-                          }}
-                        >
-                          No cooldown
-                        </button>
-                        <button type="button" className="link-button" onClick={() => setConfirmingKey(null)}>
-                          Cancel
-                        </button>
+                    {company.tracked && <EligibilityBadges eligibility={company.eligibility} />}
+                    {!company.tracked && company.alreadyAdded && (
+                      <span className="company-card-added" title="Already in your companies">
+                        ✓ Added
                       </span>
-                    ) : (
-                      <button type="button" className="row-action" onClick={() => setConfirmingKey(company.rowKey)}>
+                    )}
+                  </span>
+                </div>
+                {canQuickAdd && (
+                  <button
+                    type="button"
+                    className="row-action company-card-quick-add"
+                    onClick={() => onAdd(company)}
+                    title={`Add ${company.name} to your companies`}
+                  >
+                    + Add
+                  </button>
+                )}
+              </div>
+
+              {expanded && (
+                <div className="company-card-detail">
+                  {company.address && (
+                    <p className="company-card-detail-row">
+                      <strong>Address:</strong> {company.address}
+                      {company.zip ? `, ${company.zip}` : ''} {company.city ?? ''}
+                    </p>
+                  )}
+                  {company.industry_label && (
+                    <p className="company-card-detail-row">
+                      <strong>Industry:</strong> {company.industry_label}
+                    </p>
+                  )}
+                  {company.daysLeft != null && (
+                    <p className="company-card-detail-row">
+                      <strong>Cooldown ends in:</strong> {company.daysLeft} day{company.daysLeft === 1 ? '' : 's'}
+                    </p>
+                  )}
+                  <p className="company-card-description">
+                    {description(company) || 'No business description available.'}
+                  </p>
+
+                  {company.tracked && (onAddTag || (company.tags ?? []).length > 0) && (
+                    <div className="company-card-tags">
+                      {(company.tags ?? []).map((tag) => (
+                        <span key={tag.id} className="badge badge-neutral">
+                          {tag.name}
+                          {onRemoveTag && (
+                            <button
+                              type="button"
+                              className="company-card-tag-remove"
+                              onClick={() => onRemoveTag(company, tag.id)}
+                              aria-label={`Remove tag ${tag.name}`}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                      {onAddTag && <TagInput company={company} onAdd={onAddTag} />}
+                    </div>
+                  )}
+
+                  <div className="company-card-actions">
+                    {!company.tracked && company.alreadyAdded && (
+                      <span className="row-note">Already in your companies</span>
+                    )}
+                    {company.tracked &&
+                      onSetInContact &&
+                      (!company.eligibility || company.eligibility.kind === 'available') && (
+                        <button type="button" className="row-action" onClick={() => onSetInContact(company)}>
+                          In contact
+                        </button>
+                      )}
+                    {company.tracked && onEndInContact && company.eligibility?.kind === 'in-contact' && (
+                      <button
+                        type="button"
+                        className="row-action"
+                        title="Starts a 14-day cooldown"
+                        onClick={() => onEndInContact(company)}
+                      >
                         Not in contact anymore
                       </button>
-                    ))}
-                  {confirmingKey !== company.rowKey && company.tracked && company.is_manual && onEdit && (
-                    <button type="button" className="row-action" onClick={() => onEdit(company)}>
-                      Edit
-                    </button>
-                  )}
-                  {confirmingKey !== company.rowKey && company.tracked && canRemove && onRemove && (
-                    <button
-                      type="button"
-                      className="row-action row-action-danger"
-                      onClick={() => onRemove(company)}
-                    >
-                      Remove
-                    </button>
-                  )}
+                    )}
+                    {company.tracked &&
+                      onResetCooldown &&
+                      isAdmin &&
+                      company.eligibility?.kind === 'cooldown' && (
+                        <button type="button" className="row-action" onClick={() => onResetCooldown(company)}>
+                          Reset cooldown
+                        </button>
+                      )}
+                    {company.tracked && company.is_manual && onEdit && (
+                      <button type="button" className="row-action" onClick={() => onEdit(company)}>
+                        Edit
+                      </button>
+                    )}
+                    {company.tracked && isAdmin && onRemove && (
+                      <button
+                        type="button"
+                        className="row-action row-action-danger"
+                        onClick={() => onRemove(company)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </li>
-        )
+              )}
+            </li>
+          )
         })}
       </ul>
     </>
