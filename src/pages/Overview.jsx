@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 import CompanyList from '../components/CompanyList'
 import { useAuth } from '../context/AuthContext'
-import { listMyInContactCompanies } from '../lib/companies'
+import { listMyInContactCompanies, resetCooldown } from '../lib/companies'
 
 // Every company here is, by construction, one the viewer is in contact with
 // — either an uncommitted in_contact_by marker (still reversible — 'red')
@@ -19,9 +19,11 @@ function withInContactBadge(companies) {
 
 function Overview() {
   const { appUser } = useAuth()
+  const isAdmin = appUser?.role === 'admin'
   const [companies, setCompanies] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
     if (!appUser) return
@@ -46,7 +48,19 @@ function Overview() {
     return () => {
       active = false
     }
-  }, [appUser])
+  }, [appUser, reloadToken])
+
+  // A company can be on cooldown here without being bookmarked in "My
+  // Companies" (removed but still on cooldown — see removeCompany), so
+  // resetting has to be reachable from this page too, not just from there.
+  async function handleResetCooldown(company) {
+    try {
+      await resetCooldown(company.id)
+      setReloadToken((current) => current + 1)
+    } catch (err) {
+      window.alert(`Could not reset cooldown: ${err.message}`)
+    }
+  }
 
   return (
     <>
@@ -61,7 +75,11 @@ function Overview() {
       ) : companies.length === 0 ? (
         <p>You're not marked as in contact with, or in an active cooldown with, any company right now.</p>
       ) : (
-        <CompanyList companies={withInContactBadge(companies)} canRemove={false} />
+        <CompanyList
+          companies={withInContactBadge(companies)}
+          isAdmin={isAdmin}
+          onResetCooldown={handleResetCooldown}
+        />
       )}
     </>
   )
