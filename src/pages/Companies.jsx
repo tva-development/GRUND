@@ -26,26 +26,34 @@ import {
   updateCompany,
 } from '../lib/companies'
 
-// company.in_contact_by (an uncommitted "I've reached out" marker, freely
-// reversible) always wins over contact_eligibility (the committed, 14-day
-// cooldown state from an actual log_interaction() call) — it's the more
-// current fact. Falls through to eligibility only once no one's marked it.
+// A committed cooldown (a real log_interaction() row) always wins over the
+// company.in_contact_by marker, not the other way around. The marker is
+// only meaningful before a cooldown exists — set_in_contact() and
+// log_interaction() both refuse to let it coexist with an active cooldown
+// going forward — but it's a plain nullable column, not append-only history,
+// so leftover/inconsistent data (or anything that writes it directly) can
+// still leave it stuck set after a cooldown is already running. Trusting the
+// interaction history over the marker means a stale marker degrades to
+// showing the true cooldown state instead of a stuck lie, and it stops
+// hiding the "Reset cooldown" button (gated on kind === 'cooldown') behind
+// a marker nobody can otherwise clear from the UI.
 //
-// 'in-contact' (red) means the marker specifically — it's the only state
-// that's still reversible, which is what the "Not in contact anymore"
-// button keys off. Once a cooldown actually commits, self or teammate alike
-// show as 'cooldown' (amber) — there's nothing left to undo at that point,
-// so it shouldn't keep reading as the same actionable red state.
+// 'in-contact' (red) means the marker, with no active cooldown behind it —
+// the only state that's still reversible, which is what "Not in contact
+// anymore" keys off. Once a cooldown actually commits, self or teammate
+// alike show as 'cooldown' (amber) — nothing left to undo at that point.
 function eligibilityBadge(company, eligibility, currentUserId, inContactNames) {
+  if (eligibility && !eligibility.available) {
+    const isSelf = eligibility.last_user_id === currentUserId
+    return { kind: 'cooldown', daysLeft: eligibility.days_left, contactedBy: isSelf ? null : eligibility.lastUserName }
+  }
   if (company.in_contact_by) {
     return company.in_contact_by === currentUserId
       ? { kind: 'in-contact' }
       : { kind: 'contacting', contactedBy: inContactNames[company.in_contact_by] ?? 'a teammate' }
   }
   if (!eligibility) return null
-  if (eligibility.available) return { kind: 'available' }
-  const isSelf = eligibility.last_user_id === currentUserId
-  return { kind: 'cooldown', daysLeft: eligibility.days_left, contactedBy: isSelf ? null : eligibility.lastUserName }
+  return { kind: 'available' }
 }
 
 const LOOKUP_ERROR_MESSAGES = {
@@ -343,11 +351,12 @@ function Companies() {
 
   // "Not in contact anymore" always commits the cooldown -- no skip option,
   // per PRD V1 (the rule has to be enforced at the data layer, not offered
-  // as an easy-to-skip UI choice). If it's already blocked by someone
-  // else's fresher contact, the marker is left as-is (see
-  // confirmInContactCooldown) so nothing is lost — an admin can Reset
-  // cooldown on whichever company is actually blocking it, or it clears
-  // itself once that cooldown naturally expires.
+  // as an easy-to-skip UI choice). COOLDOWN_ACTIVE here means a cooldown was
+  // already running underneath the marker -- log_interaction() clears a
+  // marker like that as part of raising the error (see the self-heal
+  // migration), so it isn't left dangling; reload() picks up the corrected
+  // badge. Whoever's actually blocking it can just Reset cooldown, or it
+  // clears itself once that cooldown naturally expires.
   async function handleEndInContact(company) {
     try {
       await confirmInContactCooldown(company.id)
@@ -364,11 +373,11 @@ function Companies() {
         setActionError({
           rowKey: company.rowKey,
           message:
-            (daysLeft != null
-              ? `Could not start the cooldown — someone else already has ${daysLeft} day${daysLeft === 1 ? '' : 's'} left on ${company.name}.`
-              : `Could not start the cooldown for ${company.name}.`) +
-            ' The "in contact" mark is still there — try again once that cooldown clears, or reset the cooldown yourself.',
+            daysLeft != null
+              ? `${company.name} already has an active cooldown — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left.`
+              : `${company.name} already has an active cooldown.`,
         })
+        reload()
         return
       }
       setActionError({ rowKey: company.rowKey, message: `Could not update contact status: ${err.message}` })

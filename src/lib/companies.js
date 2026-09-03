@@ -216,9 +216,8 @@ export async function listMyInContactCompanies(currentUserId) {
   if (markedResult.error) throw markedResult.error
   if (eligibilityResult.error) throw eligibilityResult.error
 
-  const markedIds = new Set(markedResult.data.map((company) => company.id))
   const daysLeftByCompany = Object.fromEntries(eligibilityResult.data.map((row) => [row.company_id, row.days_left]))
-  const committedIds = eligibilityResult.data.map((row) => row.company_id).filter((id) => !markedIds.has(id))
+  const committedIds = eligibilityResult.data.map((row) => row.company_id)
 
   let committedCompanies = []
   if (committedIds.length > 0) {
@@ -227,8 +226,17 @@ export async function listMyInContactCompanies(currentUserId) {
     committedCompanies = data
   }
 
+  // A committed cooldown always wins over the in_contact_by marker, same as
+  // eligibilityBadge in pages/Companies.jsx — a company stuck in both sets
+  // (a stale marker left over from before set_in_contact/log_interaction
+  // enforced exclusivity) belongs in the cooldown bucket, not the marked
+  // one. Excluding committed ids here, rather than the old
+  // marked-ids-exclude-committed direction, is what makes that hold.
+  const committedIdSet = new Set(committedIds)
+  const markedOnly = markedResult.data.filter((company) => !committedIdSet.has(company.id))
+
   const rows = [
-    ...markedResult.data.map((company) => ({ ...asTenantRow(company), uncommitted: true, daysLeft: null })),
+    ...markedOnly.map((company) => ({ ...asTenantRow(company), uncommitted: true, daysLeft: null })),
     ...committedCompanies.map((company) => ({
       ...asTenantRow(company),
       uncommitted: false,
