@@ -50,7 +50,7 @@ function Overview() {
 
   return (
     <>
-      <span className="eyebrow">Overview</span>
+      {/* <span className="eyebrow">Overview</span> */}
       <h1>Overview</h1>
       <h2>Companies you're in contact with</h2>
 

@@ -108,7 +108,7 @@ python src/resources/build_registry_cache_csv.py C:/Users/lukas/Downloads/script
 Argumentet är mappen där bulkfilerna ligger; CSV:n hamnar i samma mapp. Tar
 några minuter. Kontrollera raden med `unika org-nummer` och hur många som
 filtrerades bort innan du går vidare.
-
+  
 ## Steg 3 · Läs in · psql
 
 Starta en session **från repo-roten** (det spelar roll — `\i` i steg 4 är
