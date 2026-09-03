@@ -162,9 +162,12 @@ export async function listEligibility() {
 // "clear without starting a cooldown" path. If a cooldown genuinely
 // shouldn't have started, that's what resetCooldown (admin-only) is for.
 
-// Step 1: mark. Doesn't touch `interaction` at all.
-export async function setInContactMarker(companyId, userId) {
-  const { error } = await supabase.from('company').update({ in_contact_by: userId }).eq('id', companyId)
+// Step 1: mark. Doesn't touch `interaction` at all. A SECURITY DEFINER RPC
+// (not a raw client update) so it's actually exclusive -- see
+// set_in_contact() -- rather than letting two people racing the same
+// "Available" company silently overwrite each other's marker.
+export async function setInContactMarker(companyId) {
+  const { error } = await supabase.rpc('set_in_contact', { p_company_id: companyId })
   if (error) throw error
 }
 

@@ -308,10 +308,36 @@ function Companies() {
 
   async function handleSetInContact(company) {
     try {
-      await setInContactMarker(company.id, appUser.id)
+      await setInContactMarker(company.id)
+      setActionError(null)
       reload()
     } catch (err) {
-      window.alert(`Could not mark as in contact: ${err.message}`)
+      if (err.message === 'ALREADY_IN_CONTACT') {
+        setActionError({
+          rowKey: company.rowKey,
+          message: `Someone else just marked ${company.name} as in contact — try again once they release it.`,
+        })
+        reload()
+        return
+      }
+      if (err.message === 'COOLDOWN_ACTIVE') {
+        let daysLeft
+        try {
+          daysLeft = JSON.parse(err.details).days_left
+        } catch {
+          // Fall through to the generic message below.
+        }
+        setActionError({
+          rowKey: company.rowKey,
+          message:
+            daysLeft != null
+              ? `${company.name} is already on cooldown — ${daysLeft} day${daysLeft === 1 ? '' : 's'} left.`
+              : `${company.name} is already on cooldown.`,
+        })
+        reload()
+        return
+      }
+      setActionError({ rowKey: company.rowKey, message: `Could not mark as in contact: ${err.message}` })
     }
   }
 
