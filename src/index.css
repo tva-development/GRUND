@@ -210,7 +210,12 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
-.row-action-danger:hover {
+.row-action:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--slate);
+}
+
+.row-action-danger:hover:not(:disabled) {
   color: #a4222c;
   border-color: #a4222c;
 }
@@ -293,7 +298,10 @@ textarea:focus-visible {
 
 /* The clickable expand/collapse row and the quick-add button next to it are
    separate elements (not button-in-button) so the add action works without
-   opening the card first, and so it never fights the row's own click. */
+   opening the card first, and so it never fights the row's own click. Hover
+   feedback lives on this wrapper, not on .company-card-summary alone — that
+   only covers its own box, leaving a visible gap over the padding and the
+   quick-add button where the highlight just stops short. */
 .company-card-header {
   display: flex;
   align-items: center;
@@ -301,12 +309,17 @@ textarea:focus-visible {
   padding-right: 14px;
 }
 
+.company-card-header:hover {
+  background: var(--border);
+}
+
 .company-card-quick-add {
   flex: none;
 }
 
 .company-card-summary {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -318,10 +331,6 @@ textarea:focus-visible {
   font: inherit;
   color: inherit;
   user-select: none;
-}
-
-.company-card-summary:hover {
-  background: var(--border);
 }
 
 .company-card-summary:focus-visible {
@@ -444,6 +453,12 @@ textarea:focus-visible {
   font-size: 0.8125rem;
   color: var(--slate);
   font-style: italic;
+}
+
+.company-card-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .company-form-grid {

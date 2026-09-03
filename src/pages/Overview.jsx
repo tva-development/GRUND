@@ -54,9 +54,6 @@ function Overview() {
   // Companies" (removed but still on cooldown — see removeCompany), so
   // resetting has to be reachable from this page too, not just from there.
   async function handleResetCooldown(company) {
-    if (!window.confirm(`Reset the cooldown on ${company.name}? They'll show as available again immediately.`)) {
-      return
-    }
     try {
       await resetCooldown(company.id)
       setReloadToken((current) => current + 1)

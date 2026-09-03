@@ -282,10 +282,9 @@ function Companies() {
     }
   }
 
+  // Confirmation happens inline in CompanyList (InlineConfirm) before this
+  // is ever called — no window.confirm here.
   async function handleRemove(company) {
-    if (!window.confirm(`Remove ${company.name} from your companies?`)) {
-      return
-    }
     try {
       await removeCompany(company.id)
       reload()
@@ -340,9 +339,6 @@ function Companies() {
   }
 
   async function handleResetCooldown(company) {
-    if (!window.confirm(`Reset the cooldown on ${company.name}? They'll show as available again immediately.`)) {
-      return
-    }
     try {
       await resetCooldown(company.id)
       reload()
@@ -519,7 +515,6 @@ function Companies() {
               onSetInContact={handleSetInContact}
               onEndInContact={handleEndInContact}
               onResetCooldown={handleResetCooldown}
-              allTags={allTags}
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
             />

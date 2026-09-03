@@ -63,7 +63,9 @@ function EligibilityBadges({ eligibility }) {
 }
 
 // Its own component (not inline JSX) so each card's draft text is local
-// state that doesn't leak into the parent list's re-renders.
+// state that doesn't leak into the parent list's re-renders. Plain text
+// input, no autocomplete dropdown — exact-name reuse already happens
+// server-side (see addTagToCompany), a picker UI wasn't adding anything.
 function TagInput({ company, onAdd }) {
   const [value, setValue] = useState('')
 
@@ -82,7 +84,6 @@ function TagInput({ company, onAdd }) {
         placeholder="Add tag…"
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        list="company-tag-options"
       />
       <button type="submit" className="link-button">
         Add
@@ -91,10 +92,32 @@ function TagInput({ company, onAdd }) {
   )
 }
 
+// A small inline "are you sure" in place of window.confirm, which renders as
+// an unstyled native browser dialog. `label` is the question, `confirmLabel`
+// the affirmative button's text, `danger` swaps its color for a destructive
+// action (Remove) vs a neutral one (Reset cooldown).
+function InlineConfirm({ label, confirmLabel, danger, onConfirm, onCancel }) {
+  return (
+    <span className="company-card-confirm">
+      <span className="row-note">{label}</span>
+      <button
+        type="button"
+        className={danger ? 'row-action row-action-danger' : 'row-action'}
+        onClick={onConfirm}
+      >
+        {confirmLabel}
+      </button>
+      <button type="button" className="link-button" onClick={onCancel}>
+        Cancel
+      </button>
+    </span>
+  )
+}
+
 // Every handler is optional so the same list can be reused read-only (the
 // Overview page's "who am I in contact with" tracker passes none of them,
-// and the corresponding buttons just don't render). `isAdmin` gates both
-// Remove and Reset cooldown — same permission, two different actions.
+// and the corresponding buttons just don't render). `isAdmin` gates Remove
+// only — Reset cooldown is open to any tenant member.
 function CompanyList({
   companies,
   isAdmin,
@@ -104,11 +127,13 @@ function CompanyList({
   onSetInContact,
   onEndInContact,
   onResetCooldown,
-  allTags,
   onAddTag,
   onRemoveTag,
 }) {
   const [expandedKey, setExpandedKey] = useState(null)
+  // Which card is mid-confirm for which action — at most one at a time, and
+  // switching cards or actions just replaces it.
+  const [confirming, setConfirming] = useState(null)
 
   if (companies.length === 0) {
     return <p>No companies match your search yet.</p>
@@ -121,13 +146,6 @@ function CompanyList({
 
   return (
     <>
-      {allTags && allTags.length > 0 && (
-        <datalist id="company-tag-options">
-          {allTags.map((tag) => (
-            <option key={tag.id} value={tag.name} />
-          ))}
-        </datalist>
-      )}
       <ul className="company-list">
         {companies.map((company) => {
           const expanded = company.rowKey === expandedKey
@@ -232,42 +250,80 @@ function CompanyList({
                     )}
                     {company.tracked &&
                       onSetInContact &&
+                      confirming?.rowKey !== company.rowKey &&
                       (!company.eligibility || company.eligibility.kind === 'available') && (
                         <button type="button" className="row-action" onClick={() => onSetInContact(company)}>
                           In contact
                         </button>
                       )}
-                    {company.tracked && onEndInContact && company.eligibility?.kind === 'in-contact' && (
-                      <button
-                        type="button"
-                        className="row-action"
-                        title="Starts a 14-day cooldown"
-                        onClick={() => onEndInContact(company)}
-                      >
-                        Not in contact anymore
-                      </button>
-                    )}
                     {company.tracked &&
-                      onResetCooldown &&
-                      isAdmin &&
-                      company.eligibility?.kind === 'cooldown' && (
-                        <button type="button" className="row-action" onClick={() => onResetCooldown(company)}>
-                          Reset cooldown
+                      onEndInContact &&
+                      confirming?.rowKey !== company.rowKey &&
+                      company.eligibility?.kind === 'in-contact' && (
+                        <button
+                          type="button"
+                          className="row-action"
+                          title="Starts a 14-day cooldown"
+                          onClick={() => onEndInContact(company)}
+                        >
+                          Not in contact anymore
                         </button>
                       )}
-                    {company.tracked && company.is_manual && onEdit && (
+                    {company.tracked && onResetCooldown && company.eligibility?.kind === 'cooldown' && (
+                      <>
+                        {confirming?.rowKey === company.rowKey && confirming.kind === 'reset' ? (
+                          <InlineConfirm
+                            label={`Reset the cooldown on ${company.name}?`}
+                            confirmLabel="Reset cooldown"
+                            onConfirm={() => {
+                              onResetCooldown(company)
+                              setConfirming(null)
+                            }}
+                            onCancel={() => setConfirming(null)}
+                          />
+                        ) : (
+                          confirming?.rowKey !== company.rowKey && (
+                            <button
+                              type="button"
+                              className="row-action"
+                              onClick={() => setConfirming({ rowKey: company.rowKey, kind: 'reset' })}
+                            >
+                              Reset cooldown
+                            </button>
+                          )
+                        )}
+                      </>
+                    )}
+                    {company.tracked && company.is_manual && onEdit && confirming?.rowKey !== company.rowKey && (
                       <button type="button" className="row-action" onClick={() => onEdit(company)}>
                         Edit
                       </button>
                     )}
                     {company.tracked && isAdmin && onRemove && (
-                      <button
-                        type="button"
-                        className="row-action row-action-danger"
-                        onClick={() => onRemove(company)}
-                      >
-                        Remove
-                      </button>
+                      <>
+                        {confirming?.rowKey === company.rowKey && confirming.kind === 'remove' ? (
+                          <InlineConfirm
+                            label={`Remove ${company.name} from your companies?`}
+                            confirmLabel="Remove"
+                            danger
+                            onConfirm={() => {
+                              onRemove(company)
+                              setConfirming(null)
+                            }}
+                            onCancel={() => setConfirming(null)}
+                          />
+                        ) : (
+                          confirming?.rowKey !== company.rowKey && (
+                            <button
+                              type="button"
+                              className="row-action row-action-danger"
+                              onClick={() => setConfirming({ rowKey: company.rowKey, kind: 'remove' })}
+                            >
+                              Remove
+                            </button>
+                          )
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
