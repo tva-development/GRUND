@@ -71,6 +71,14 @@ function Companies() {
   const [editingCompany, setEditingCompany] = useState(null)
   const [reloadToken, setReloadToken] = useState(0)
 
+  // Inline, per-row error (e.g. "Not in contact anymore" losing the race to
+  // someone else's fresher cooldown) — shown in the card itself instead of
+  // window.alert, same reasoning as InlineConfirm replacing window.confirm.
+  const [actionError, setActionError] = useState(null)
+  function dismissActionError() {
+    setActionError(null)
+  }
+
   // Org numbers the tenant already tracks — lets "All Companies" flag a row
   // as already added without re-fetching that whole page after every add.
   const [trackedOrgNumbers, setTrackedOrgNumbers] = useState(new Set())
@@ -317,6 +325,7 @@ function Companies() {
   async function handleEndInContact(company) {
     try {
       await confirmInContactCooldown(company.id)
+      setActionError(null)
       reload()
     } catch (err) {
       if (err.message === 'COOLDOWN_ACTIVE') {
@@ -326,15 +335,17 @@ function Companies() {
         } catch {
           // Fall through to the generic message below.
         }
-        window.alert(
-          (daysLeft != null
-            ? `Could not start the cooldown — someone else already has ${daysLeft} day${daysLeft === 1 ? '' : 's'} left on ${company.name}.`
-            : `Could not start the cooldown for ${company.name}.`) +
-            ' The "in contact" mark is still there — try again once that cooldown clears, or ask an admin to reset it.',
-        )
+        setActionError({
+          rowKey: company.rowKey,
+          message:
+            (daysLeft != null
+              ? `Could not start the cooldown — someone else already has ${daysLeft} day${daysLeft === 1 ? '' : 's'} left on ${company.name}.`
+              : `Could not start the cooldown for ${company.name}.`) +
+            ' The "in contact" mark is still there — try again once that cooldown clears, or reset the cooldown yourself.',
+        })
         return
       }
-      window.alert(`Could not update contact status: ${err.message}`)
+      setActionError({ rowKey: company.rowKey, message: `Could not update contact status: ${err.message}` })
     }
   }
 
@@ -517,6 +528,8 @@ function Companies() {
               onResetCooldown={handleResetCooldown}
               onAddTag={handleAddTag}
               onRemoveTag={handleRemoveTag}
+              actionError={actionError}
+              onDismissError={dismissActionError}
             />
           )}
         </>

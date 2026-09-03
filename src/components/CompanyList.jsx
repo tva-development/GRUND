@@ -129,6 +129,8 @@ function CompanyList({
   onResetCooldown,
   onAddTag,
   onRemoveTag,
+  actionError,
+  onDismissError,
 }) {
   const [expandedKey, setExpandedKey] = useState(null)
   // Which card is mid-confirm for which action — at most one at a time, and
@@ -242,6 +244,15 @@ function CompanyList({
                       ))}
                       {onAddTag && <TagInput company={company} onAdd={onAddTag} />}
                     </div>
+                  )}
+
+                  {actionError?.rowKey === company.rowKey && (
+                    <p className="company-card-error">
+                      {actionError.message}
+                      <button type="button" className="link-button" onClick={onDismissError}>
+                        Dismiss
+                      </button>
+                    </p>
                   )}
 
                   <div className="company-card-actions">
