@@ -306,15 +306,19 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-right: 14px;
 }
 
 .company-card-header:hover {
   background: var(--border);
 }
 
+/* The row's right edge belongs to whichever element ends it: the button when
+   there is one, otherwise .company-card-summary's own padding. Padding on the
+   header itself left a 14px strip that read as part of the row but toggled
+   nothing when clicked. */
 .company-card-quick-add {
   flex: none;
+  margin-right: 14px;
 }
 
 .company-card-summary {
@@ -354,8 +358,9 @@ textarea:focus-visible {
 
 /* Org number, name, legal form and SNI are things people copy out to paste
    elsewhere — selectable/copyable despite living inside a click-to-expand
-   row. toggleExpanded checks for an active selection before toggling, so
-   dragging across this text doesn't also open/close the card. */
+   row, and the only selectable things in it. The row measures how far the
+   pointer travelled (see isDragGesture), so dragging across this text doesn't
+   also open/close the card while a plain tap still does. */
 .company-card-name {
   font-weight: 500;
   overflow: hidden;
