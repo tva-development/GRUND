@@ -9,6 +9,7 @@ import {
   addManualCompany,
   addTagToCompany,
   confirmInContactCooldown,
+  formatOrgNumber,
   listCompanyTags,
   listEligibility,
   listMyCompanies,
@@ -164,6 +165,12 @@ function Companies() {
 
   const [myLoading, setMyLoading] = useState(true)
   const [myError, setMyError] = useState(null)
+  // Whether CompanyList has ever had real data to show. Kept separate from
+  // myLoading so a reload() — fired by In contact / Not in contact anymore,
+  // among others — refetches without unmounting CompanyList: unmounting
+  // resets its internal expand/confirm state, snapping an open card shut out
+  // from under whoever just clicked something in it.
+  const [myHasLoadedOnce, setMyHasLoadedOnce] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -174,6 +181,7 @@ function Companies() {
         if (!active) return
         setMyCompanies(results)
         setMyError(null)
+        setMyHasLoadedOnce(true)
       } catch (err) {
         if (!active) return
         setMyError(err.message ?? 'Search failed')
@@ -198,6 +206,10 @@ function Companies() {
   const [allHasMore, setAllHasMore] = useState(false)
   const [allLoading, setAllLoading] = useState(true)
   const [allError, setAllError] = useState(null)
+  // See myHasLoadedOnce above — same reasoning: reload() (add/edit/remove all
+  // call it) must not unmount CompanyList once it has real data, or the card
+  // someone has open gets slammed shut mid-action.
+  const [allHasLoadedOnce, setAllHasLoadedOnce] = useState(false)
 
   // A query edit always jumps back to page 0 — paging through stale results
   // from the previous search would be confusing.
@@ -221,6 +233,7 @@ function Companies() {
         setAllRows(rows)
         setAllHasMore(hasMore)
         setAllError(null)
+        setAllHasLoadedOnce(true)
 
         const trimmed = allQuery.trim()
         setRegistryHit(null)
@@ -469,7 +482,7 @@ function Companies() {
 
           {allError && <p className="company-search-error">Search failed: {allError}</p>}
 
-          {allLoading ? (
+          {allLoading && !allHasLoadedOnce ? (
             <p>Loading…</p>
           ) : (
             <>
@@ -522,7 +535,7 @@ function Companies() {
             <div className="company-lookup-prompt">
               <p>
                 Fetched from Bolagsverket: <strong>{registryHit.name}</strong> (
-                {registryHit.org_number}) — not yet in your list.
+                {formatOrgNumber(registryHit.org_number)}) — not yet in your list.
               </p>
               <button className="btn" onClick={() => handleAdd(registryHit)}>
                 Add to my companies
@@ -549,7 +562,7 @@ function Companies() {
 
           {myError && <p className="company-search-error">Search failed: {myError}</p>}
 
-          {myLoading ? (
+          {myLoading && !myHasLoadedOnce ? (
             <p>Loading…</p>
           ) : (
             <CompanyList

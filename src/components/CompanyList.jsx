@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+
+import { formatOrgNumber } from '../lib/companies'
 
 const COMPANY_FORM_LABELS = {
   AB: 'Aktiebolag',
@@ -19,7 +21,7 @@ function description(company) {
 
 function metaLine(company) {
   return [
-    company.org_number ?? '—',
+    formatOrgNumber(company.org_number) ?? '—',
     COMPANY_FORM_LABELS[company.company_form] ?? company.company_form ?? '—',
     company.city,
     company.sni_code ? `SNI ${company.sni_code}` : null,
@@ -28,12 +30,26 @@ function metaLine(company) {
     .join(' · ')
 }
 
-// A click that ends a text selection still fires a click event on mouseup —
-// without this check, dragging to select an org number or a name would also
-// toggle the card open/closed out from under you.
-function hasActiveSelection() {
-  const selection = window.getSelection()
-  return !!selection && selection.toString().length > 0
+// A drag that selects text ends with a click event on mouseup, so the summary
+// row has to tell "tap to toggle" apart from "drag to copy an org number".
+//
+// It must not do that by asking whether a selection exists. .company-card-summary
+// is user-select:none, and clicking a non-selectable region does not clear the
+// document's selection — so one stray highlight anywhere on the page swallowed
+// every later click on the row, permanently, until the user happened to click
+// something selectable. Rapid toggling hit the same wall: a double-click leaves a
+// word (or a lone space) selected between its two clicks.
+//
+// Judge the gesture instead — only a pointer that actually travelled is a drag.
+const DRAG_SLOP_PX = 4
+
+function isDragGesture(origin, event) {
+  // Keyboard-synthesised clicks report detail 0 and carry no pointer origin.
+  if (!origin || event.detail === 0) return false
+  return (
+    Math.abs(event.clientX - origin.x) > DRAG_SLOP_PX ||
+    Math.abs(event.clientY - origin.y) > DRAG_SLOP_PX
+  )
 }
 
 // See eligibilityBadge in pages/Companies.jsx for how these four shapes get
@@ -136,14 +152,27 @@ function CompanyList({
   // Which card is mid-confirm for which action — at most one at a time, and
   // switching cards or actions just replaces it.
   const [confirming, setConfirming] = useState(null)
+  // Where the pointer went down on a summary row, so its click can be read as a
+  // tap or a drag. One gesture is ever in flight, so one ref covers every card.
+  const pointerOrigin = useRef(null)
 
   if (companies.length === 0) {
     return <p>No companies match your search yet.</p>
   }
 
   function toggleExpanded(rowKey) {
-    if (hasActiveSelection()) return
     setExpandedKey((current) => (current === rowKey ? null : rowKey))
+  }
+
+  function handleSummaryClick(rowKey, event) {
+    const origin = pointerOrigin.current
+    pointerOrigin.current = null
+    if (isDragGesture(origin, event)) return
+    // The row can't clear a leftover highlight itself (user-select:none), so a
+    // tap does what clicking any other bit of document would have done.
+    const selection = window.getSelection()
+    if (selection && selection.toString()) selection.removeAllRanges()
+    toggleExpanded(rowKey)
   }
 
   return (
@@ -160,7 +189,15 @@ function CompanyList({
                   role="button"
                   tabIndex={0}
                   aria-expanded={expanded}
-                  onClick={() => toggleExpanded(company.rowKey)}
+                  onPointerDown={(event) => {
+                    pointerOrigin.current = { x: event.clientX, y: event.clientY }
+                  }}
+                  onMouseDown={(event) => {
+                    // Keep rapid toggling from leaving the browser's
+                    // double-click word selection behind on the row.
+                    if (event.detail > 1) event.preventDefault()
+                  }}
+                  onClick={(event) => handleSummaryClick(company.rowKey, event)}
                   onKeyDown={(event) => {
                     if (event.key !== 'Enter' && event.key !== ' ') return
                     event.preventDefault()

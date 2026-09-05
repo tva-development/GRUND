@@ -27,6 +27,60 @@ function normalizeOrgNumber(query) {
   return query.replace(/[\s-]/g, '')
 }
 
+// Enskild firma / other personnummer-shaped identitetsbeteckningar are
+// cached with the full century (12 digits, e.g. 191511286237 for someone
+// born in 1915) because that's the shape Bolagsverket returns. Swedish
+// convention drops the century when writing or searching a personnummer by
+// hand, though (1511286237, not 191511286237 — same as filling in a form).
+// A plain 10-digit query is genuinely ambiguous between that shorthand and
+// an ordinary organisationsnummer (also 10 digits, but never
+// century-prefixed), so rather than guess which, try the typed value and
+// both plausible centuries and let whichever is actually in the cache
+// answer. org_number is the primary key, so each candidate is an indexed
+// point lookup — no scan, even tried three at once.
+function orgNumberSearchCandidates(normalized) {
+  if (normalized.length !== 10) return [normalized]
+  return [normalized, `19${normalized}`, `20${normalized}`]
+}
+
+// Whether the person behind a 12-digit personnummer has had their 100th
+// birthday, which is what picks the separator below.
+function hasTurned100(year, month, day) {
+  // Samordningsnummer add 60 to the day. The birth date underneath is the
+  // real one, and that's what the separator is about.
+  const hundredth = new Date(year + 100, month - 1, day > 60 ? day - 60 : day)
+  if (Number.isNaN(hundredth.getTime())) return false
+  return hundredth <= new Date()
+}
+
+// Display form. Storage stays canonical digits (see normalizeOrgNumber) —
+// this is only for showing them, since nothing in the registry is stored
+// with a separator.
+//
+// An organisationsnummer is written NNNNNN-NNNN. A personnummer is written
+// the way people actually write one: without the century, YYMMDD-NNNN, with
+// the separator carrying the century instead — '+' once the holder has
+// turned 100, '-' before that.
+//
+// That separator is the whole reason dropping the century stays lossless,
+// and it has to: the registry holds 3 500+ enskild firma rows on the 20xx
+// side against 157 000+ on the 19xx side. The two ranges can't collide,
+// because '-' means born after 1926 (YY 27-99 for 19xx, 00-26 for 20xx)
+// while '+' means born 1926 or earlier — so every YY reads unambiguously.
+export function formatOrgNumber(orgNumber) {
+  if (!orgNumber) return orgNumber
+  const digits = normalizeOrgNumber(String(orgNumber))
+  if (!/^\d+$/.test(digits)) return orgNumber
+
+  if (digits.length === 10) return `${digits.slice(0, 6)}-${digits.slice(6)}`
+  if (digits.length !== 12) return orgNumber
+
+  const separator = hasTurned100(Number(digits.slice(0, 4)), Number(digits.slice(4, 6)), Number(digits.slice(6, 8)))
+    ? '+'
+    : '-'
+  return `${digits.slice(2, 8)}${separator}${digits.slice(8)}`
+}
+
 // The table renders tenant rows and registry rows side by side, but only the
 // former have a uuid. `rowKey` gives every row something stable to key and
 // select on; `tracked` is what the UI branches on to decide whether a row
@@ -95,7 +149,7 @@ export async function listRegistryCompanies({ page = 0, query = '' } = {}) {
       .select('*')
       .order('registered_at', { ascending: false, nullsFirst: false })
       .range(from, to)
-    if (trimmed) builder = builder.eq('org_number', normalizeOrgNumber(trimmed))
+    if (trimmed) builder = builder.in('org_number', orgNumberSearchCandidates(normalizeOrgNumber(trimmed)))
     ;({ data, error } = await builder)
   }
 
@@ -305,14 +359,17 @@ export async function removeTagFromCompany(companyId, tagId) {
 }
 
 // Tier 2 — the shared, read-only registry cache. Anyone's prior lookup.
+// Same century ambiguity as listRegistryCompanies above — see
+// orgNumberSearchCandidates — so this takes whichever centuried candidate
+// is actually cached rather than requiring the caller to already know it.
 export async function findInRegistryCache(orgNumber) {
-  const { data, error } = await supabase
-    .from('company_registry_cache')
-    .select('*')
-    .eq('org_number', normalizeOrgNumber(orgNumber))
-    .maybeSingle()
+  const candidates = orgNumberSearchCandidates(normalizeOrgNumber(orgNumber))
+  const { data, error } = await supabase.from('company_registry_cache').select('*').in('org_number', candidates)
   if (error) throw error
-  return data
+  if (data.length > 1) {
+    throw new Error(`Ambiguous org number ${orgNumber} — matches ${data.map((row) => row.org_number).join(', ')}`)
+  }
+  return data[0] ?? null
 }
 
 // Tier 3 — live Bolagsverket lookup via the company-lookup Edge Function.

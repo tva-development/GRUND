@@ -24,6 +24,10 @@ function Overview() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [reloadToken, setReloadToken] = useState(0)
+  // See myHasLoadedOnce in Companies.jsx — same reasoning: once CompanyList
+  // has real data, a refetch must not unmount it just because loading flips
+  // true again, or any card someone has open snaps shut under them.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
 
   useEffect(() => {
     if (!appUser) return
@@ -36,6 +40,7 @@ function Overview() {
         if (!active) return
         setCompanies(rows)
         setError(null)
+        setHasLoadedOnce(true)
       } catch (err) {
         if (!active) return
         setError(err.message ?? 'Failed to load')
@@ -70,7 +75,7 @@ function Overview() {
 
       {error && <p className="company-search-error">Failed to load: {error}</p>}
 
-      {loading ? (
+      {loading && !hasLoadedOnce ? (
         <p>Loading…</p>
       ) : companies.length === 0 ? (
         <p>You're not marked as in contact with, or in an active cooldown with, any company right now.</p>
