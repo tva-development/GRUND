@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react'
 
+import { formatOrgNumber } from '../lib/companies'
+
 const COMPANY_FORM_LABELS = {
   AB: 'Aktiebolag',
   HB: 'Handelsbolag',
@@ -19,7 +21,7 @@ function description(company) {
 
 function metaLine(company) {
   return [
-    company.org_number ?? '—',
+    formatOrgNumber(company.org_number) ?? '—',
     COMPANY_FORM_LABELS[company.company_form] ?? company.company_form ?? '—',
     company.city,
     company.sni_code ? `SNI ${company.sni_code}` : null,

@@ -9,6 +9,7 @@ import {
   addManualCompany,
   addTagToCompany,
   confirmInContactCooldown,
+  formatOrgNumber,
   listCompanyTags,
   listEligibility,
   listMyCompanies,
@@ -534,7 +535,7 @@ function Companies() {
             <div className="company-lookup-prompt">
               <p>
                 Fetched from Bolagsverket: <strong>{registryHit.name}</strong> (
-                {registryHit.org_number}) — not yet in your list.
+                {formatOrgNumber(registryHit.org_number)}) — not yet in your list.
               </p>
               <button className="btn" onClick={() => handleAdd(registryHit)}>
                 Add to my companies
